@@ -1,0 +1,43 @@
+# Built data artifacts (large; rebuild with data/build_app_db.py)
+data/canonical_promoter.duckdb
+data/aggregate/
+data/gtex/
+data/depmap/
+data/network/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Docker
+.docker-build-cache/
+
+# Build info — written by deploy step, baked into the image, never committed
+app/_build_info.txt
+
+# UX-audit screenshots (artifacts — regenerate with tools/screenshot.py)
+docs/ux-audit/
+
+# Env
+.env
+.env.local
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Auto-generated project context for Claude Code
+CLAUDE.md

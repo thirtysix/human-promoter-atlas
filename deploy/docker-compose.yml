@@ -1,0 +1,54 @@
+# Human Promoter Atlas — production deploy (shared-host pattern)
+#
+# The Hetzner box hosts several sites behind a single system nginx + certbot.
+# This stack runs the Streamlit app ONLY and binds it to 127.0.0.1:8501 so
+# nginx (managed at the OS level, not in Docker) can vhost-route to it.
+#
+# DO NOT add a caddy/traefik service here — that would conflict with the
+# system nginx on :80/:443 and break every sibling site.
+#
+# Run from the repo root on the server:
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# Local smoke test on the laptop:
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#   curl -fsS http://127.0.0.1:8501/healthz
+#   docker compose -f deploy/docker-compose.yml down
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: app/Dockerfile
+    image: human-promoter-atlas:latest
+    container_name: hpa-app
+    restart: unless-stopped
+    # CRITICAL: bind to 127.0.0.1 only so the container is reachable from the
+    # host nginx but NOT from the public internet. Plain "8501:8501" would
+    # expose it on the public IP and bypass TLS.
+    ports:
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - ../data:/srv/app/data:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8501/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    # Container hardening (audit M3): drop all caps, no privilege escalation,
+    # read-only rootfs with a small tmpfs for /tmp (pip writes nothing at
+    # runtime; Streamlit caches go to st.cache_resource which is in-memory).
+    cap_drop: ["ALL"]
+    security_opt:
+      - "no-new-privileges:true"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          # CPU cap (audit M4): leave headroom for sibling sites on the
+          # shared host.
+          cpus: "3"

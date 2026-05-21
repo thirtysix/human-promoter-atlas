@@ -1,0 +1,41 @@
+{
+  "built_at": "2026-04-30T19:51:59",
+  "analysis_dn": "data/raw/analyses",
+  "k_canonical": 10,
+  "a_canonical": 8,
+  "datasets": {
+    "ensembl": "GRCh38.114",
+    "chip_atlas": "TF/per_TF (snapshot in analyses/canonical_promoter)",
+    "msigdb": "c5.go.bp.v2026.1.Hs"
+  },
+  "parameters": {
+    "tss_window_aggregate_bp": [
+      -1000,
+      1000
+    ],
+    "peak_recenter_half_bp": 12,
+    "tss_modules_outer_half_bp": 1500,
+    "tss_modules_kde_bw_bp": 25,
+    "tss_modules_min_support_tfs": 2,
+    "tss_modules_min_score_assign": 500,
+    "tss_modules_boundary_frac": 0.2,
+    "valid_chroms": [
+      "1-22",
+      "X",
+      "Y",
+      "MT"
+    ]
+  },
+  "tables": [
+    "tss",
+    "tf",
+    "peaks",
+    "modules",
+    "module_program",
+    "programs",
+    "program_tf_top",
+    "program_go_top",
+    "tf_clusters",
+    "gene_configs"
+  ]
+}

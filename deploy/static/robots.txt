@@ -1,0 +1,6 @@
+# Human Promoter Atlas — search engines welcome
+User-agent: *
+Allow: /
+Disallow: /healthz
+Disallow: /_stcore/
+Crawl-delay: 1

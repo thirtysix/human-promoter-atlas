@@ -1,0 +1,20 @@
+# Skip everything that isn't needed in the image
+.git
+.github
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv
+.idea
+.vscode
+.DS_Store
+node_modules
+docs
+deploy
+DEPLOY.md
+README.md
+.gitignore
+*.md
+# data/ is excluded from the image entirely — it's volume-mounted at runtime
+data/
