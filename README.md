@@ -10,37 +10,115 @@ This repo contains the **viewer**. The upstream analysis pipeline that
 produces the inputs lives outside this repo; pointers to its expected
 layout are in `data/build_app_db.py`.
 
-## What you can do here
+## Tour
 
-- **Aggregate**: how TFs distribute around canonical TSSs across the
-  whole genome — heatmaps with toggleable row ordering (total signal /
-  argmax position / hierarchical / K=8 cluster), metaplots, quick-start
-  links.
-- **Programs & modules**: browse the 10 algorithmically-selected NMF
-  programs. Top TFs, top GO BP terms, position density, K=8-cluster
-  cross-tab, plus a 10×10 program-co-occurrence heatmap (lift = obs/exp).
-- **Archetypes**: gene-level NMF on per-gene program-presence vectors
-  (A=8). Each canonical gene gets a single archetype label with
-  biology-clean GO BP enrichment (e.g., A6 cohesin → homophilic
-  cell-cell adhesion at OR=7.5).
-- **GO search**: reverse search by GO term — find programs / archetypes
-  that enrich for any of 147 indexed biological processes.
-- **Per-transcript**: search by gene/transcript → modules + TF rugs +
-  per-program rows + clickable program-detail popovers + archetype label
-  + GTEx tissue expression + DepMap CRISPR essentiality.
-- **Compare**: two transcripts side-by-side — promoter maps, program
-  presence diff, paired GTEx, paired DepMap.
-- **Per-TF**: aggregate profile (with optional cluster-mean overlay),
-  program loadings across the 10 programs, GTEx expression, DepMap
-  essentiality, top co-binding partners, top bound TSSs.
-- **TF network**: atlas-wide TF × TF co-binding pairs — 327k pairs over
-  1,064 TFs, ranked by n_shared / Jaccard / lift.
-- **Methods**: glossary, pipeline, parameters with rationale,
-  verification anchors, limitations, citations.
+The viewer has nine top-nav tabs. Each addresses a different scale of
+question — population-level, program-level, gene-level, TF-level — over
+the same underlying ~12 million peak calls.
 
-URL deep-linking is supported: `?gene=GAPDH&tf=CTCF&program=7` seeds the
-search state on load, and selectbox changes write back to the URL so
-every view is shareable.
+URL deep-linking is supported throughout: `?gene=GAPDH&tf=CTCF&program=7`
+seeds the search state on load; selectbox changes write back to the URL
+so every view is shareable.
+
+### Aggregate — the genome-wide baseline
+
+![Aggregate tab](docs/screenshots/01-aggregate.png)
+
+Mean binding profile of each TF across ~19,700 canonical
+protein-coding promoters, transcription-oriented around the TSS at 0 bp.
+Establishes the reference everything else is interpreted against — for
+example, TBP peaking just upstream of the TSS confirms the canonical
+TATA-box position. Highlight individual TFs to compare any one factor to
+the crowd; toggle between binary occupancy and summed score.
+
+### Programs & modules — recurring promoter archetypes
+
+![Programs tab](docs/screenshots/02-programs.png)
+
+A **module** is a local cluster of TF binding within a single
+promoter (±1.5 kb of its TSS). A **program** is one of 10 archetypal
+modules — discovered by NMF on the ~77,000-module × ~1,300-TF occupancy
+matrix — each with a recognizable biological signature (e.g. P5 cohesin,
+P7 PIC, P1 chromatin downstream). For each program: top TFs by NMF H
+loading, position-density across the window, module-driver-class
+breakdown, and a full-atlas TF × tissue expression heatmap from GTEx.
+
+### Archetypes — gene-level promoter labels
+
+![Archetypes tab](docs/screenshots/03-archetypes.png)
+
+The natural endpoint of the hierarchical decomposition:
+TFs → modules → programs → **archetypes**. Each canonical gene is a
+10-vector counting how many of its modules belong to each program; NMF
+on that [genes × programs] matrix gives A = 8 gene-level archetypes.
+A6, for example, is the cohesin-dominated archetype whose 4,869 genes
+light up homophilic cell-cell adhesion at OR = 7.5 — the
+protocadherin/cohesin-anchored signal.
+
+### GO search — reverse lookup by biology
+
+![GO search tab](docs/screenshots/04-go-search.png)
+
+Type a biological process from the GO BP catalogue (or pick from
+autocomplete over 147 indexed terms) and see every program + archetype
+enriched for it, plus the overlap genes that drove each hit. The
+inverse of the per-program GO view: instead of *"what does this program
+do?"*, it answers *"which programs implement this biology?"*
+
+### Per-transcript — what's happening at one promoter
+
+![Per-transcript tab](docs/screenshots/05-transcript.png)
+
+The full module decomposition of a single canonical promoter:
+smoothed density of TF binding, every individual TF binding within
+±1.5 kb at score ≥ 500, and the modules detected from that density —
+each colored by its dominant program. Above the promoter map: archetype
+label, module count, distinct programs, and the upstream → downstream
+program path (e.g. GAPDH is A7 with 10 modules implementing 8 distinct
+programs).
+
+### Compare — two transcripts side-by-side
+
+![Compare tab](docs/screenshots/06-compare.png)
+
+Compare any two genes' promoter architecture on aligned coordinates:
+promoter maps, program presence diff (A-only / shared / B-only), paired
+GTEx tissue expression, and paired DepMap essentiality. Three curated
+pairs are prefilled as quick-starts (GAPDH vs IL6, TBP vs MYC, CDK4 vs
+RB1) to illustrate the comparisons the viewer is best at: housekeeper
+vs cytokine, general factor vs proliferation amplifier, kinase vs its
+substrate.
+
+### Per-TF — what does this transcription factor do?
+
+![Per-TF tab](docs/screenshots/07-per-tf.png)
+
+Everything the atlas knows about a single TF: aggregate binding
+profile (with optional cluster-mean overlay), loading on each of the 10
+programs, TF-cluster membership at K=8 / K=12, DepMap CRISPR
+essentiality across lineages, GTEx tissue expression, top co-binding
+partners ranked by shared modules, and top bound TSSs. CTCF — shown
+here — appears in both P5 (cohesin near TSS) and P1 (chromatin
+downstream): same factor, two roles, separated cleanly by NMF.
+
+### TF network — atlas-wide co-binding pairs
+
+![TF network tab](docs/screenshots/08-tf-network.png)
+
+One row per unordered (TF A, TF B) pair, counting how many of the
+~77,000 modules they share. 327,242 pairs over 1,064 unique TFs.
+Filter by search / minimum n_shared / minimum Jaccard / sort by lift
+(co-occurrence over independence). Surfaces TF cliques and obligate
+partnerships — MAX × MYC, KAT6A × KAT6B paralogs, CTCF × RAD21
+cohesin (87% of RAD21's modules co-bind CTCF), NFYA × SP1, ZFX × ZFY.
+
+### Methods — provenance and reproducibility
+
+![Methods tab](docs/screenshots/09-methods.png)
+
+Glossary, pipeline summary, parameters with rationale, verification
+anchors, limitations, citations. The exact dataset versions, parameter
+values, and scripts that produced every number in the rest of the app.
 
 ## Stack
 
