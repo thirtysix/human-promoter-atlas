@@ -79,14 +79,15 @@ so every view is shareable.
 
 ![Per-transcript tab](docs/screenshots/05-transcript.png)
 
-> The full module decomposition of a single canonical promoter:
-> smoothed density of TF binding, every individual TF binding within
-> ±1.5 kb at score ≥ 500, and the modules detected from that density —
-> each colored by its dominant program. Above the promoter map:
-> archetype label, module count, distinct programs, and the upstream →
-> downstream program path (e.g. GAPDH is A7 with 10 modules implementing
-> 8 distinct programs). GTEx tissue expression and DepMap CRISPR
-> essentiality for the gene round out the view.
+> The full module decomposition of a single canonical promoter. The
+> KDE curve is the smoothed density of TF binding within ±1.5 kb of the
+> TSS; the vertical color bands behind it are the detected modules,
+> each tinted by its dominant program. The header row reports the
+> gene-level archetype (here A7), module and distinct-program counts,
+> and the upstream → downstream program path. Below the promoter map
+> (off-screen in this capture) sit per-TF rugs at score ≥ 500, GTEx
+> tissue expression, DepMap CRISPR essentiality, and a TF–target
+> essentiality coupling card.
 
 ---
 
