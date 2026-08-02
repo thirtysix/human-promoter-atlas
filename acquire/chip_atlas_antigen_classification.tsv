@@ -1,0 +1,88 @@
+# ChIP-Atlas TF-class antigens that are NOT current GRCh38.114 gene symbols.
+# Source antigen set: <HPA_CHIP_ATLAS_DIR>/per_TF/q1e-50
+# Reference: Homo_sapiens.GRCh38.114.gtf.gz
+#
+# class=renamed_gene rows are REAL factors recoverable under current_symbol.
+# Ensembl's GTF has no gene_synonym attribute, so a symbol-only match drops
+# them silently -- that is the bug this table exists to prevent.
+# Regenerate: python make_antigen_classification.py
+antigen	class	current_symbol	in_grch38_114	dual_listed	ambiguous	peaks_q1e50	note
+5-hmC	chemical_mark		no	no	no	13626	chemical/structural DNA or histone mark, not a protein antigen
+5-mC	chemical_mark		no	no	no	131377	chemical/structural DNA or histone mark, not a protein antigen
+8-Hydroxydeoxyguanosine	chemical_mark		no	no	no	59605	chemical/structural DNA or histone mark, not a protein antigen
+Crotonyllysine	chemical_mark		no	no	no	24752	chemical/structural DNA or histone mark, not a protein antigen
+Cyclobutane	chemical_mark		no	no	no	26	chemical/structural DNA or histone mark, not a protein antigen
+DNA-RNA	chemical_mark		no	no	no	6085	chemical/structural DNA or histone mark, not a protein antigen
+G-quadruplex	chemical_mark		no	no	no	4861	chemical/structural DNA or histone mark, not a protein antigen
+O-GlcNAc	chemical_mark		no	no	no	26999	chemical/structural DNA or histone mark, not a protein antigen
+Pan-acetyllysine	chemical_mark		no	no	no	209	chemical/structural DNA or histone mark, not a protein antigen
+RDme1	chemical_mark		no	no	no	5	chemical/structural DNA or histone mark, not a protein antigen
+RNA-DNA	chemical_mark		no	no	no	1452	chemical/structural DNA or histone mark, not a protein antigen
+AML1-ETO	fusion_protein		no	no	no	35023	oncogenic fusion, not a single reference gene
+MLL-AF10	fusion_protein		no	no	no	57	oncogenic fusion, not a single reference gene
+MLL-AF4	fusion_protein		no	no	no	327	oncogenic fusion, not a single reference gene
+MLL-AF6	fusion_protein		no	no	no	12	oncogenic fusion, not a single reference gene
+ZNF788	pseudogene_now	ZNF788P	yes	no	no	10657	locus retired to pseudogene status in GRCh38.114; excluded from the TF axis
+ZSCAN5D	pseudogene_now	ZSCAN5DP	yes	no	no	271	locus retired to pseudogene status in GRCh38.114; excluded from the TF axis
+Biotin	reagent_or_tag		no	no	no	45476	affinity tag, nuclease, or capture reagent, not a biological antigen
+BrdU	reagent_or_tag		no	no	no	6895	affinity tag, nuclease, or capture reagent, not a biological antigen
+Cas9	reagent_or_tag		no	no	no	6003	affinity tag, nuclease, or capture reagent, not a biological antigen
+Cpf1	reagent_or_tag		no	no	no	290	affinity tag, nuclease, or capture reagent, not a biological antigen
+Epitope	reagent_or_tag		no	no	no	2770218	affinity tag, nuclease, or capture reagent, not a biological antigen
+GFP	reagent_or_tag		no	no	no	494536	affinity tag, nuclease, or capture reagent, not a biological antigen
+MethylCap	reagent_or_tag		no	no	no	1316	affinity tag, nuclease, or capture reagent, not a biological antigen
+SVS-1	reagent_or_tag		no	no	no	1193	affinity tag, nuclease, or capture reagent, not a biological antigen
+pFM2	reagent_or_tag		no	no	no	347	affinity tag, nuclease, or capture reagent, not a biological antigen
+ARNTL	renamed_gene	BMAL1	yes	no	no	51537	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+ARNTL2	renamed_gene	BMAL2	yes	no	no	26	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+ASUN	renamed_gene	INTS13	yes	yes	no	1947	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol; DUAL-LISTED -- current symbol is also its own antigen file, read BOTH (they contain different SRX experiments)
+BMI	renamed_gene	BMI1	yes	yes	no	80	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol; DUAL-LISTED -- current symbol is also its own antigen file, read BOTH (they contain different SRX experiments)
+C10orf12	renamed_gene	LCOR	yes	yes	no	6	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol; DUAL-LISTED -- current symbol is also its own antigen file, read BOTH (they contain different SRX experiments)
+C11orf53	renamed_gene	POU2AF2	yes	no	no	12088	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+C17orf96	renamed_gene	EPOP	yes	yes	no	8	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol; DUAL-LISTED -- current symbol is also its own antigen file, read BOTH (they contain different SRX experiments)
+C7orf26	renamed_gene	INTS15	yes	no	no	1763	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+CCDC101	renamed_gene	SGF29	yes	no	no	158	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+CPSF3L	renamed_gene	INTS11	yes	no	no	25621	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+DEC1	renamed_gene	DELEC1	yes	no	no	123	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+FAM208A	renamed_gene	TASOR	yes	no	no	534	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+FAM208B	renamed_gene	TASOR2	yes	no	no	182	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+GLTSCR1	renamed_gene	BICRA	yes	no	no	1381	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+GUCY1B3	renamed_gene	GUCY1B1	yes	no	no	233	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+HDGF2	renamed_gene	HDGFL2	yes	no	no	968	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+MGEA5	renamed_gene	OGA	yes	no	no	582	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+MINA	renamed_gene	RIOX2	yes	no	no	579	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+MKL1	renamed_gene	MRTFA	yes	no	no	16545	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+MKL2	renamed_gene	MRTFB	yes	no	no	19718	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+MRE11A	renamed_gene	MRE11	yes	no	no	1643	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+PAD2	renamed_gene	PADI2	yes	yes	no	5991	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol; DUAL-LISTED -- current symbol is also its own antigen file, read BOTH (they contain different SRX experiments)
+PHB	renamed_gene	PHB1	yes	no	no	727	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+PTRF	renamed_gene	CAVIN1	yes	no	no	934	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+STRA13	renamed_gene	CENPX	yes	no	no	368	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+T	renamed_gene	TBXT	yes	no	no	1522	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+TAZ	renamed_gene	WWTR1	yes	yes	yes	13130	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol; DUAL-LISTED -- current symbol is also its own antigen file, read BOTH (they contain different SRX experiments); AMBIGUOUS legacy name -- not merged, review before use
+TCEB3	renamed_gene	ELOA	yes	no	no	121	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+TRF2	renamed_gene	TERF2	yes	yes	yes	697	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol; DUAL-LISTED -- current symbol is also its own antigen file, read BOTH (they contain different SRX experiments); AMBIGUOUS legacy name -- not merged, review before use
+WHSC1	renamed_gene	NSD2	yes	no	no	828	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+WHSC1L1	renamed_gene	NSD3	yes	no	no	1698	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+ZCCHC11	renamed_gene	TUT4	yes	no	no	873	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+ZUFSP	renamed_gene	ZUP1	yes	no	no	341	real gene under a deprecated symbol; RECOVERABLE -- fetch from ChIP-Atlas under the antigen name, store under current_symbol
+RNF219	retired_unmapped		no	no	no	1177	absent from GRCh38.114 under this or any obvious current symbol; needs manual review before use
+TCEB3C	retired_unmapped		no	no	no	793	absent from GRCh38.114 under this or any obvious current symbol; needs manual review before use
+WDR61	retired_unmapped		no	no	no	242	absent from GRCh38.114 under this or any obvious current symbol; needs manual review before use
+ZNF645	retired_unmapped		no	no	no	554	absent from GRCh38.114 under this or any obvious current symbol; needs manual review before use
+ZNF720	retired_unmapped		no	no	no	397	absent from GRCh38.114 under this or any obvious current symbol; needs manual review before use
+AAV	viral_protein		no	no	no	2478	virus-encoded protein, not a human gene
+EBNA1	viral_protein		no	no	no	247	virus-encoded protein, not a human gene
+EBNA2	viral_protein		no	no	no	3739	virus-encoded protein, not a human gene
+EBNA3	viral_protein		no	no	no	336	virus-encoded protein, not a human gene
+EBV-ZEBRA	viral_protein		no	no	no	1573	virus-encoded protein, not a human gene
+HBcAg	viral_protein		no	no	no	7	virus-encoded protein, not a human gene
+HHV	viral_protein		no	no	no	168	virus-encoded protein, not a human gene
+HIV	viral_protein		no	no	no	21	virus-encoded protein, not a human gene
+HIV1	viral_protein		no	no	no	200	virus-encoded protein, not a human gene
+Hepatitis	viral_protein		no	no	no	67	virus-encoded protein, not a human gene
+KSHV	viral_protein		no	no	no	3378	virus-encoded protein, not a human gene
+MCPV	viral_protein		no	no	no	165	virus-encoded protein, not a human gene
+RTA	viral_protein		no	no	no	1516	virus-encoded protein, not a human gene
+TRP47	viral_protein		no	no	no	1351	virus-encoded protein, not a human gene
+VSV-G	viral_protein		no	no	no	523	virus-encoded protein, not a human gene
