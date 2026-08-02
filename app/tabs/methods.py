@@ -103,10 +103,17 @@ PARAMS_WITH_RATIONALE = [
     ("Min support per module", "≥2 distinct TFs",
      "≥1 invites isolated-peak noise; ≥3 occasionally drops single-TF + "
      "cofactor lineage modules. 2 is the empirical compromise."),
-    ("Min peak score for assignment", "≥500",
-     "ChIP-atlas scores cap at 1,000. ≥500 keeps cell-type-restricted "
-     "strong peaks while filtering weak / one-off calls. Module *discovery* "
-     "uses all peaks; only TF *assignment* applies the filter."),
+    ("Min peak score for assignment", "≥250",
+     "ChIP-atlas score is −10·log₁₀(Q), capped at 1,000, so ≥250 means "
+     "Q < 1E-25. Module *discovery* uses every peak in the input; only TF "
+     "*assignment* applies this filter, so weak peaks still shape where "
+     "modules are while only better-supported ones name the TFs in them. "
+     "Chosen by calibration, not convention: replication across disjoint "
+     "halves of each TF's experiments is flat from score 50 to 500, so a "
+     "stricter cut buys no precision; GO programs are more specific at 250 "
+     "than at 500; and removing the filter entirely assigns a median 38 TFs "
+     "to a ~177 bp module, against 13 here and 12 in the earlier Q<1E-50 "
+     "build."),
     ("Boundary fraction", "20% of peak height",
      "How far we walk outward from a module center before declaring its "
      "edge. Combined with valley-detection between adjacent peaks."),
@@ -163,9 +170,13 @@ LIMITATIONS = [
      "not 'always co-bound'. Cell-type-specific co-binding is therefore "
      "blurred."),
     ("Score saturation",
-     "ChIP-atlas peak scores cap at 1,000. The score = 1,000 subset is "
-     "biased toward universally bound TFs (CTCF/MYC/SP1) — we use score ≥ "
-     "500 instead so cell-type-restricted regulators survive."),
+     "ChIP-atlas peak scores cap at 1,000, and the score = 1,000 subset is "
+     "biased toward universally bound TFs (CTCF/MYC/SP1). Assignment "
+     "therefore uses score ≥ 250 (Q < 1E-25) so cell-type-restricted "
+     "regulators survive. Note this filter was inert in the earlier Q<1E-50 "
+     "build: every peak in that input already scored ≥ 500 by construction, "
+     "so the two-tier design described above only takes effect on the "
+     "current Q<1E-5 input, where 81% of in-window peaks fall below 500."),
     ("Annotation dependence",
      "We restrict to Ensembl_canonical protein-coding transcripts on "
      "chromosomes 1–22, X, Y, MT. lncRNAs, miRNAs, and non-canonical "
