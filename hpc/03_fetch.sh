@@ -28,11 +28,20 @@ PROJ="${HPA_CSC_PROJECT:-}"
 [[ -n "$PROJ" ]] || { echo "need HPA_CSC_PROJECT in .env" >&2; exit 2; }
 REMOTE="${HPA_REMOTE:-roihu}"
 WORK="${HPA_SCRATCH:-/scratch/$PROJ/human-promoter-atlas}"
-# Mirrors config.py: the .s<score> suffix appears only off the default 500.
-BUILD="${TIER}.${TF_SET}"
-[[ -n "$SCORE" && "$SCORE" != "500" ]] && BUILD="${BUILD}.s${SCORE}"
+
+# Ask config for the build directory, exactly as pipeline.slurm does. This was
+# "the .s<score> suffix appears only off the default 500", copied from config
+# and then left behind when config changed to ALWAYS include the score: the two
+# had already diverged, so a fetch would rsync q1e-5.all/ over a build that
+# lives in q1e-5.all.s250/. A duplicated path rule drifts; asking cannot.
+# `env` and not a bare assignment prefix: a prefix has to be literal at parse
+# time, so ${SCORE:+HPA_MIN_SCORE_ASSIGN=...} would expand into a command name.
+DST=$(cd "$REPO/pipeline" && env HPA_TIER="$TIER" HPA_TF_SET="$TF_SET" \
+      ${SCORE:+HPA_MIN_SCORE_ASSIGN="$SCORE"} \
+      python3 -c "import config; print(config.OUT_DN)") \
+  || { echo "[fetch] could not resolve the build path from config" >&2; exit 1; }
+BUILD="$(basename "$DST")"
 SRC="$WORK/out/$BUILD"
-DST="${HPA_ANALYSIS_ROOT:?}/$BUILD"
 
 echo "[fetch] $REMOTE:$SRC -> $DST"
 
