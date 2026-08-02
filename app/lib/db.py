@@ -40,6 +40,41 @@ def load_manifest() -> dict:
     return json.loads(MANIFEST_PATH.read_text())
 
 
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def build_facts() -> dict:
+    """Counts and build axes for the prose in the Methods / Programs tabs.
+
+    These were literals in the tab sources ("1,304 TFs", "76,999 x 1,304",
+    "score >= 500"), which is fine until a rebuild moves them: after the
+    assignment threshold was recalibrated, the Methods tab described a build
+    the app was not serving. Every value here comes from the manifest that
+    `data/build_app_db.py` writes alongside the DuckDB, so the text follows
+    the data.
+
+    Missing values come back as ``None`` rather than a guess; callers phrase
+    around them. `_fmt` is the formatter to use for display.
+    """
+    m = load_manifest()
+    counts = m.get("counts") or {}
+    build = m.get("build") or {}
+    return {
+        "n_tf": counts.get("n_tf"),
+        "n_tss": counts.get("n_tss"),
+        "n_modules": counts.get("n_modules"),
+        "n_programs": counts.get("n_programs") or m.get("k_canonical"),
+        "tier": build.get("tier"),
+        "qvalue": build.get("qvalue"),
+        "tf_set": build.get("tf_set"),
+        "min_score_assign": build.get("min_score_assign"),
+        "k_canonical": m.get("k_canonical"),
+    }
+
+
+def fmt_count(n: int | None, unknown: str = "?") -> str:
+    """Thousands-separated, or a placeholder when the manifest lacks the key."""
+    return f"{n:,}" if isinstance(n, int) else unknown
+
+
 # ---------------------------------------------------------------------------
 # Lookups
 # ---------------------------------------------------------------------------

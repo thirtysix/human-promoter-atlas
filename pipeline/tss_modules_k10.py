@@ -19,7 +19,7 @@ import scipy.sparse as sp
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-from sklearn.decomposition import NMF
+import nmf_fit
 
 # Machine-specific paths and build axes -> pipeline/config.py
 from config import OUT_DN
@@ -54,12 +54,13 @@ def main():
     print(f"  M={M.shape}  n_tf={len(tf_names)}  modules in matrix={len(modules_in)}")
 
     print(f"NMF k={K}")
-    nmf = NMF(n_components=K, init="random", max_iter=300,
-              random_state=SEED, beta_loss="frobenius",
-              solver="mu", tol=1e-4)
-    W = nmf.fit_transform(M)
-    H = nmf.components_
-    print(f"  err={nmf.reconstruction_err_:.2f}")
+    # Collapse-guarded: a fit where a component wins no row would be written out
+    # as a real program and summarized as one. Seed 0 does not collapse on the
+    # published matrix, so this is a no-op there and only bites on a rebuild.
+    W, H, err, retries = nmf_fit.fit_nmf_stable(M, K, SEED, max_iter=300)
+    if retries:
+        print(f"  NMF collapsed on seed {SEED}; re-seeded {retries}x")
+    print(f"  err={err:.2f}")
     W, H = relabel_by_size(W, H)
 
     # Save W / H

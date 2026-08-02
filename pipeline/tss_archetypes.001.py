@@ -42,10 +42,10 @@ import pandas as pd
 import scipy.sparse as sp
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.decomposition import NMF
 from sklearn.metrics import adjusted_rand_score
 
 # Machine-specific paths and build axes -> pipeline/config.py
+import nmf_fit
 from config import OUT_DN
 
 
@@ -77,11 +77,13 @@ def _log(msg: str):
 
 
 def fit_nmf(M, k: int, seed: int):
-    nmf = NMF(n_components=k, init="random", solver="mu",
-              beta_loss="frobenius", max_iter=NMF_MAX_ITER,
-              random_state=seed, tol=1e-4)
-    W = nmf.fit_transform(M)
-    return W, nmf.components_, float(nmf.reconstruction_err_)
+    """Collapse-guarded fit. See ``pipeline/nmf_fit.py`` for why re-seeding is
+    the fix rather than a different initialiser."""
+    W, H, err, retries = nmf_fit.fit_nmf_stable(
+        M, k, seed, max_iter=NMF_MAX_ITER)
+    if retries:
+        _log(f"  A={k} seed={seed}: NMF collapsed, re-seeded {retries}x")
+    return W, H, err
 
 
 ################################################################################

@@ -6,13 +6,14 @@ import streamlit as st
 from app.lib import db, nav, plotting, ui
 
 
-HELP_PROGRAMS = (
-    "A 'program' is a recurring TF-by-position archetype across human "
-    "promoters, discovered by NMF on the [n_module × n_TF] occupancy "
-    "matrix. k=10 was chosen algorithmically by ARI stability + Brunet "
-    "cophenetic correlation. Each program has a TF signature and a "
-    "characteristic position relative to the TSS."
-)
+def help_programs(f: dict) -> str:
+    return (
+        "A 'program' is a recurring TF-by-position archetype across human "
+        "promoters, discovered by NMF on the [n_module × n_TF] occupancy "
+        f"matrix. k={f['k_canonical']} was chosen algorithmically by ARI "
+        "stability + Brunet cophenetic correlation. Each program has a TF "
+        "signature and a characteristic position relative to the TSS."
+    )
 HELP_TOP_TFS = (
     "TFs ranked by H loading — the program's per-TF coefficient in the "
     "NMF decomposition. Higher = the TF is more characteristic of this "
@@ -46,24 +47,31 @@ HELP_TF_TISSUE_HEATMAP = (
     "cluster on the left. This is the *direct* TF×tissue view — "
     "complementary to the module-aggregated activity shown elsewhere."
 )
-HELP_PROG_SUMMARY = (
-    "One row per program. `n modules` is the count of modules whose "
-    "dominant program is this one (out of 76,999 total). `median bp from "
-    "TSS` and `median width` summarize the position panel."
-)
+def help_prog_summary(f: dict) -> str:
+    return (
+        "One row per program. `n modules` is the count of modules whose "
+        f"dominant program is this one (out of {db.fmt_count(f['n_modules'])} "
+        "total). `median bp from TSS` and `median width` summarize the "
+        "position panel."
+    )
 
 
 def render() -> None:
+    # Counts come from the build manifest, not from literals in this string —
+    # they change with every rebuild of the atlas.
+    f = db.build_facts()
+    k = f["k_canonical"]
     ui.intro_card(
         title="Programs and modules — recurring promoter archetypes",
         what="A **module** is a local cluster of TF binding within a "
              "single promoter (±1.5 kb of its TSS). A **program** is one "
-             "of 10 archetypal modules — discovered by NMF on the "
-             "[77,000 modules × 1,304 TFs] occupancy matrix — each with a "
+             f"of {k} archetypal modules — discovered by NMF on the "
+             f"[{db.fmt_count(f['n_modules'])} modules × "
+             f"{db.fmt_count(f['n_tf'])} TFs] occupancy matrix — each with a "
              "TF signature and a characteristic position relative to the TSS.",
         objective="Find the small number of *reusable* regulatory units "
                    "from which human promoters are built.",
-        significance="The 10 programs cover ~93% of canonical TSSs with "
+        significance=f"The {k} programs cover ~93% of canonical TSSs with "
                       "chip-atlas evidence. Each lights up a clean "
                       "biological signal: GABPA/THAP11 → ribosome "
                       "biogenesis (OR=5.4); RUNX/FLI/SPI → immune system; "
@@ -72,7 +80,7 @@ def render() -> None:
                       "the human promoter.",
     )
 
-    st.subheader("Programs and modules (k=10)", help=HELP_PROGRAMS)
+    st.subheader(f"Programs and modules (k={k})", help=help_programs(f))
 
     progs = db.get_programs()
 
@@ -98,11 +106,11 @@ def render() -> None:
     )
     reading = progs.loc[progs["program"] == sel, "reading"].iloc[0]
 
-    # ---- Program summary card (reference / context for all 10) -----------
+    # ---- Program summary card (reference / context for every program) ----
     with st.container(border=True):
         st.markdown(
             "### Program summary",
-            help=HELP_PROG_SUMMARY + "  \n\n"
+            help=help_prog_summary(f) + "  \n\n"
                  "**`tau`** is the Yanai 2005 tissue-specificity index over "
                  "the program's mean module-TF TPM across the 66 GTEx "
                  "tissues. 0 = uniform, 1 = single-tissue. **`top tissue`** "

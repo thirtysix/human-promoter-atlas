@@ -45,12 +45,12 @@ import pandas as pd
 import scipy.sparse as sp
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.decomposition import NMF
 from sklearn.metrics import adjusted_rand_score
 from scipy.cluster.hierarchy import linkage, cophenet
 from scipy.spatial.distance import squareform
 
 # Machine-specific paths and build axes -> pipeline/config.py
+import nmf_fit
 from config import OUT_DN
 
 
@@ -82,56 +82,15 @@ def _ts():
     return dt.datetime.now().strftime("%H:%M:%S")
 
 
-def fit_nmf_dominant(M, k: int, seed: int):
-    """Fit NMF, return (dominant_program_per_row, frobenius_err)."""
-    # init stays "random". This metric asks how consistently independent starts
-    # converge on the same partition, so the starts must genuinely differ.
-    #
-    # The multiplicative-update solver can drive a component to zero from a
-    # random start -- 1 of 20 seeds at k=18 on the 1,793-TF matrix collapsed to a
-    # SINGLE component -- which yields reconstruction_err_=nan and an ARI of
-    # exactly 0.000 against any healthy partition. Those were solver failures
-    # being scored as instability. The caller detects and re-seeds them; see
-    # fit_nmf_stable.
-    #
-    # Two alternatives were measured at k=18 (20 seeds) and rejected:
-    #   nndsvdar+mu : no collapses, but ARI rises to 0.819 here and 0.98 at low
-    #                 k -- every seed starts from nearly the same NNDSVD point,
-    #                 so the metric measures init determinism, not the data.
-    #   random+cd   : no collapses, but ARI halves to 0.233, changing the scale
-    #                 of the statistic and breaking comparison with the
-    #                 published selection.
-    # Re-seeding keeps the median intact (0.420 -> 0.425) while lifting the
-    # minimum off the floor (0.000 -> 0.308): it removes the artifact and
-    # nothing else.
-    nmf = NMF(n_components=k, init="random",
-              max_iter=NMF_MAX_ITER, random_state=seed,
-              beta_loss="frobenius", solver="mu", tol=1e-4)
-    W = nmf.fit_transform(M)
-    dom = W.argmax(axis=1).astype(np.int32)
-    err = float(nmf.reconstruction_err_)
-    # A fit where some component never wins a single row is degenerate even when
-    # the error is finite, so check both.
-    collapsed = (not np.isfinite(err)) or (len(np.unique(dom)) < k)
-    return dom, err, collapsed
-
-
 def fit_nmf_stable(M, k: int, seed: int, max_extra: int = 50):
-    """fit_nmf_dominant, re-seeding past collapsed fits.
+    """Collapse-guarded fit at this script's iteration cap.
 
-    Returns (dom, err, n_retries). Seeds beyond the requested one are drawn from
-    a disjoint high range so a retry can never duplicate another slot's seed and
-    silently turn two independent fits into one.
+    The guard itself, and the measurements behind keeping ``init="random"``,
+    live in ``pipeline/nmf_fit.py`` -- three scripts fit the same matrix and a
+    second copy of the collapse rule is how they would drift apart.
     """
-    dom, err, collapsed = fit_nmf_dominant(M, k, seed)
-    if not collapsed:
-        return dom, err, 0
-    for i in range(max_extra):
-        alt = 100_000 + seed * max_extra + i
-        dom, err, collapsed = fit_nmf_dominant(M, k, alt)
-        if not collapsed:
-            return dom, err, i + 1
-    raise RuntimeError(f"k={k} seed={seed}: NMF collapsed on {max_extra} retries")
+    return nmf_fit.fit_nmf_dominant_stable(
+        M, k, seed, max_iter=NMF_MAX_ITER, max_extra=max_extra)
 
 
 def median_pairwise_ari(label_matrix: np.ndarray):

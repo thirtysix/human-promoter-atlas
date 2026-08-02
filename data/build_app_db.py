@@ -629,16 +629,64 @@ def copy_gtex_outputs():
             _log(f"  gtex: {src.name} -> data/gtex/")
 
 
-def write_manifest(canonical_A: int = 0):
-    """Versions + parameters for the Methods tab."""
+# Fields copied out of the upstream build stamp, by explicit whitelist. The
+# stamp also records per_tf_dn, which is a cluster scratch path -- manifest.json
+# is committed to a public repo, so this stays an allowlist and never becomes a
+# blanket copy.
+_BUILD_STAMP_KEYS = ("tier", "qvalue", "tf_set", "min_score_assign")
+
+
+def read_build_stamp() -> dict:
+    """The build's own ``_BUILD.json``, which is the authority on its axes.
+
+    ``config.py`` derives the build directory from tier/tf_set/score, and the
+    one rule of that layout is that nothing re-implements it -- a second copy of
+    the path rule is what once made a rerun skip the stage it was asked to redo
+    and exit 0. So the axes are read from the stamp the pipeline wrote, neither
+    re-derived here nor imported from ``config``: importing it would demand
+    HPA_CHIP_ATLAS_DIR and friends, which this packing step has no use for.
+
+    Returns ``{}`` for the original flat layout, which predates the stamp.
+    """
+    stamp_fn = ANALYSIS_DN / "_BUILD.json"
+    if not stamp_fn.is_file():
+        _log(f"  manifest: no _BUILD.json under {ANALYSIS_DN} — "
+             f"build axes recorded as null")
+        return {}
+    stamp = json.loads(stamp_fn.read_text())
+    return {k: stamp[k] for k in _BUILD_STAMP_KEYS if k in stamp}
+
+
+def write_manifest(canonical_A: int = 0, counts: dict | None = None):
+    """Versions + parameters for the Methods tab.
+
+    ``counts`` are read back out of the DuckDB just written, so the numbers the
+    Methods tab prints describe the data this app actually serves. They used to
+    be prose constants in the tab source, and they drifted: the text still said
+    1,304 TFs and score >= 500 after the assignment threshold was recalibrated.
+    """
     canA_path = ARCHETYPE_DN / "canonical_A.txt"
     if canonical_A == 0 and canA_path.exists():
         canonical_A = int(canA_path.read_text().strip())
+    stamp = read_build_stamp()
+    counts = counts or {}
     manifest = {
         "built_at": datetime.now().isoformat(timespec="seconds"),
         "analysis_dn": str(ANALYSIS_DN),
         "k_canonical": K_CANONICAL,
         "a_canonical": canonical_A,
+        "build": {
+            "tier": stamp.get("tier"),
+            "qvalue": stamp.get("qvalue"),
+            "tf_set": stamp.get("tf_set"),
+            "min_score_assign": stamp.get("min_score_assign"),
+        },
+        "counts": {
+            "n_tf": counts.get("tf"),
+            "n_tss": counts.get("tss"),
+            "n_modules": counts.get("modules"),
+            "n_programs": counts.get("programs"),
+        },
         "datasets": {
             "ensembl": "GRCh38.114",
             "chip_atlas": "TF/per_TF (snapshot in analyses/canonical_promoter)",
@@ -650,7 +698,9 @@ def write_manifest(canonical_A: int = 0):
             "tss_modules_outer_half_bp": 1500,
             "tss_modules_kde_bw_bp": 25,
             "tss_modules_min_support_tfs": 2,
-            "tss_modules_min_score_assign": 500,
+            # The same quantity as the tier (score = -10*log10(Q)), so it comes
+            # from the build stamp rather than being restated as a literal here.
+            "tss_modules_min_score_assign": stamp.get("min_score_assign"),
             "tss_modules_boundary_frac": 0.20,
             "valid_chroms": ["1-22", "X", "Y", "MT"],
         },
@@ -698,8 +748,10 @@ def main():
                    peak_dist_no_filter AS peak_distance_from_tss
             FROM tf WHERE cluster_no_filter IS NOT NULL;
         """)
-        # Sanity counts
+        # Sanity counts. Also the source of the manifest's `counts` block, so
+        # the Methods tab quotes the data it is serving rather than a literal.
         _log("table sizes:")
+        counts = {}
         tables = ["tss", "tf", "peaks", "modules", "module_program",
                   "programs", "program_tf_top", "program_go_top",
                   "gene_configs"]
@@ -709,6 +761,7 @@ def main():
         for t in tables:
             try:
                 n = con.execute(f"SELECT COUNT(*) FROM {t};").fetchone()[0]
+                counts[t] = n
                 _log(f"  {t:28s}  {n:>12,}")
             except Exception:
                 pass
@@ -718,7 +771,7 @@ def main():
     copy_aggregate_matrices()
     copy_gtex_outputs()
     copy_depmap_outputs()
-    write_manifest()
+    write_manifest(canonical_A, counts)
     size_mb = DUCKDB_FN.stat().st_size / 1e6
     _log(f"DONE — {DUCKDB_FN.name} = {size_mb:.1f} MB")
 

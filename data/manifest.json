@@ -3,6 +3,18 @@
   "analysis_dn": "data/raw/analyses",
   "k_canonical": 10,
   "a_canonical": 8,
+  "build": {
+    "tier": "q1e-50",
+    "qvalue": 1e-50,
+    "tf_set": "whitelist",
+    "min_score_assign": 500
+  },
+  "counts": {
+    "n_tf": 1304,
+    "n_tss": 19745,
+    "n_modules": 76999,
+    "n_programs": 10
+  },
   "datasets": {
     "ensembl": "GRCh38.114",
     "chip_atlas": "TF/per_TF (snapshot in analyses/canonical_promoter)",

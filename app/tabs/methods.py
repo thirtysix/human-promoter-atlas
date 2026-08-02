@@ -2,6 +2,8 @@
 verification anchors, limitations, citations."""
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import streamlit as st
 
@@ -11,6 +13,11 @@ from app.lib import db, ui
 # ---------------------------------------------------------------------------
 # Static content
 # ---------------------------------------------------------------------------
+# Anything that names a count or a threshold is built from the build manifest
+# (see `db.build_facts`) rather than written as a literal. These numbers move
+# whenever the atlas is rebuilt on a different tier, TF axis or assignment
+# score, and prose does not move with them: this tab spent a release describing
+# a score >= 250 / Q<1E-5 build while serving the Q<1E-50 one.
 GLOSSARY = [
     ("TSS", "Transcription start site. Each canonical protein-coding "
             "transcript (Ensembl_canonical) contributes one TSS."),
@@ -52,7 +59,28 @@ GLOSSARY = [
      "biological-interpretation background."),
 ]
 
-PIPELINE = [
+def pipeline(f: dict) -> list[tuple[str, str, str]]:
+    """Stage table. `f` is `db.build_facts()`."""
+    score = f["min_score_assign"]
+    n_mod = db.fmt_count(f["n_modules"])
+    n_tf = db.fmt_count(f["n_tf"])
+    k = f["k_canonical"] if f["k_canonical"] is not None else "?"
+    return _PIPELINE_HEAD + [
+        ("4. Per-gene modules",
+         "tss_modules.001.py",
+         "Per-TSS KDE on peak midpoints (σ = 25 bp, weight 1 per TF per TSS), "
+         "find_peaks → module centers, walk-out boundary detection, ≥2-TF "
+         f"support filter, score ≥ {score if score is not None else '?'} for "
+         "binary occupancy assignment."),
+        ("5. NMF on modules",
+         "tss_modules_select_k.001.py + tss_modules_k10.py",
+         f"20-seed ARI + 5,000-module Brunet cophenetic to pick k={k}. NMF (MU "
+         f"solver, random init) on the {n_mod} × {n_tf} sparse binary matrix → "
+         "W (modules × programs), H (programs × TFs)."),
+    ] + _PIPELINE_TAIL
+
+
+_PIPELINE_HEAD = [
     ("1. Aggregate",
      "canonical_promoter_aggregate.001.py",
      "ChIP-atlas BEDs → mean TF×position matrices over ±1 kb (binary, score, "
@@ -65,16 +93,11 @@ PIPELINE = [
      "enrich_clusters_msigdb.001.py",
      "Hypergeometric vs MSigDB c5.go.bp universe, BH-FDR, both `tf_bg` and "
      "`genome_bg` backgrounds. The genome_bg version is used in the app."),
-    ("4. Per-gene modules",
-     "tss_modules.001.py",
-     "Per-TSS KDE on peak midpoints (σ = 25 bp, weight 1 per TF per TSS), "
-     "find_peaks → module centers, walk-out boundary detection, ≥2-TF "
-     "support filter, score ≥ 500 for binary occupancy assignment."),
-    ("5. NMF on modules",
-     "tss_modules_select_k.001.py + tss_modules_k10.py",
-     "20-seed ARI + 5,000-module Brunet cophenetic to pick k=10. NMF (MU "
-     "solver, random init) on the 76,999 × 1,304 sparse binary matrix → "
-     "W (modules × programs), H (programs × TFs)."),
+]
+
+# Stages 4 and 5 name the assignment score and the matrix shape, so they are
+# built per-render in `pipeline()` above.
+_PIPELINE_TAIL = [
     ("6. Per-program GO BP",
      "enrich_tss_modules_msigdb.001.py",
      "Hypergeometric vs MSigDB universe; gene set per program = unique "
@@ -85,7 +108,59 @@ PIPELINE = [
      "parquets used by this viewer."),
 ]
 
-PARAMS_WITH_RATIONALE = [
+def _tier_score(qvalue: float | None) -> int | None:
+    """The tier expressed in score units. Score is −10·log₁₀(Q), so a tier and
+    an assignment threshold are the same quantity in two numberings."""
+    if not qvalue:
+        return None
+    return int(round(-10 * math.log10(qvalue)))
+
+
+def _assignment_note(f: dict) -> str:
+    """Whether the assignment filter actually excludes anything on this build.
+
+    It is only a second threshold if it sits above the tier the peaks came
+    from. Pinned to 500 on a Q<1E-50 input it excludes nothing by construction,
+    which is how a documented two-tier design ran for a release doing nothing.
+    """
+    score, tier_score = f["min_score_assign"], _tier_score(f["qvalue"])
+    if score is None or tier_score is None:
+        return ""
+    if score <= tier_score:
+        return (
+            f" On this build the filter is **inert**: every peak in the "
+            f"{f['tier']} input already scores ≥ {tier_score} by construction, "
+            f"so ≥ {score} excludes nothing. It only becomes a second "
+            f"threshold on a looser input tier."
+        )
+    return (
+        " Chosen by calibration, not convention: replication across disjoint "
+        "halves of each TF's experiments is flat from score 50 to 500, so a "
+        "stricter cut buys no precision; GO programs are more specific at 250 "
+        "than at 500; and removing the filter entirely assigns a median 38 TFs "
+        "to a ~177 bp module, against 13 there and 12 in the Q<1E-50 build."
+    )
+
+
+def params_with_rationale(f: dict) -> list[tuple[str, str, str]]:
+    """Parameter table. `f` is `db.build_facts()`."""
+    score = f["min_score_assign"]
+    scale = (
+        "ChIP-atlas score is −10·log₁₀(Q), capped at 1,000, so "
+        f"≥{score} means Q < 1E-{score // 10}. "
+    ) if score is not None else ""
+    return _PARAMS_HEAD + [
+        ("Min peak score for assignment",
+         f"≥{score}" if score is not None else "—",
+         scale
+         + "Module *discovery* uses every peak in the input; only TF "
+           "*assignment* applies this filter, so weak peaks still shape where "
+           "modules are while only better-supported ones name the TFs in them."
+         + _assignment_note(f)),
+    ] + _PARAMS_TAIL
+
+
+_PARAMS_HEAD = [
     ("Window (aggregate)", "±1,000 bp",
      "Centered around the TSS. Wide enough to see core + flanks; narrow "
      "enough to keep memory tractable."),
@@ -103,17 +178,11 @@ PARAMS_WITH_RATIONALE = [
     ("Min support per module", "≥2 distinct TFs",
      "≥1 invites isolated-peak noise; ≥3 occasionally drops single-TF + "
      "cofactor lineage modules. 2 is the empirical compromise."),
-    ("Min peak score for assignment", "≥250",
-     "ChIP-atlas score is −10·log₁₀(Q), capped at 1,000, so ≥250 means "
-     "Q < 1E-25. Module *discovery* uses every peak in the input; only TF "
-     "*assignment* applies this filter, so weak peaks still shape where "
-     "modules are while only better-supported ones name the TFs in them. "
-     "Chosen by calibration, not convention: replication across disjoint "
-     "halves of each TF's experiments is flat from score 50 to 500, so a "
-     "stricter cut buys no precision; GO programs are more specific at 250 "
-     "than at 500; and removing the filter entirely assigns a median 38 TFs "
-     "to a ~177 bp module, against 13 here and 12 in the earlier Q<1E-50 "
-     "build."),
+]
+
+# The assignment-score row names the threshold and reads differently depending
+# on whether it bites, so it is built per-render in `params_with_rationale`.
+_PARAMS_TAIL = [
     ("Boundary fraction", "20% of peak height",
      "How far we walk outward from a module center before declaring its "
      "edge. Combined with valley-detection between adjacent peaks."),
@@ -163,28 +232,68 @@ VERIFICATION = [
      "(no chip-atlas evidence); ~12% are mono-modular focused promoters."),
 ]
 
-LIMITATIONS = [
-    ("Cell-type pooling",
-     "ChIP-atlas aggregates experiments across tissues and cell lines for "
-     "each TF. A peak at a TSS reflects 'observed in *any* assayed context', "
-     "not 'always co-bound'. Cell-type-specific co-binding is therefore "
-     "blurred."),
-    ("Score saturation",
-     "ChIP-atlas peak scores cap at 1,000, and the score = 1,000 subset is "
-     "biased toward universally bound TFs (CTCF/MYC/SP1). Assignment "
-     "therefore uses score ≥ 250 (Q < 1E-25) so cell-type-restricted "
-     "regulators survive. Note this filter was inert in the earlier Q<1E-50 "
-     "build: every peak in that input already scored ≥ 500 by construction, "
-     "so the two-tier design described above only takes effect on the "
-     "current Q<1E-5 input, where 81% of in-window peaks fall below 500."),
-    ("Annotation dependence",
-     "We restrict to Ensembl_canonical protein-coding transcripts on "
-     "chromosomes 1–22, X, Y, MT. lncRNAs, miRNAs, and non-canonical "
-     "transcripts are out of scope."),
-    ("TF coverage",
-     "1,304 TFs after intersecting chip-atlas filename stems with a curated "
-     "DNA-binding gene list. ~250 known human TFs are not represented because "
-     "no chip-atlas data exists for them."),
+def limitations(f: dict) -> list[tuple[str, str]]:
+    """Caveat table. `f` is `db.build_facts()`."""
+    score, tier_score = f["min_score_assign"], _tier_score(f["qvalue"])
+    n_tf = db.fmt_count(f["n_tf"])
+    if score is not None and tier_score is not None and score <= tier_score:
+        saturation = (
+            f"Assignment uses score ≥ {score}, which on this {f['tier']} build "
+            f"excludes nothing — every peak in the input already scores "
+            f"≥ {tier_score}. On a looser input tier the same filter is what "
+            f"keeps cell-type-restricted regulators from being drowned out."
+        )
+    elif score is not None:
+        saturation = (
+            f"Assignment therefore uses score ≥ {score} (Q < 1E-{score // 10}) "
+            f"so cell-type-restricted regulators survive. The filter only "
+            f"takes effect on an input tier looser than the threshold; on the "
+            f"earlier Q<1E-50 build every peak already scored ≥ 500, so it was "
+            f"inert."
+        )
+    else:
+        saturation = "Assignment applies a minimum peak score."
+
+    # The `all` axis takes every ChIP-Atlas antigen that resolves to a GRCh38
+    # symbol; `whitelist` intersects with the curated DNA-binding gene table
+    # and so leaves a documented gap.
+    if f["tf_set"] == "whitelist":
+        coverage = (
+            f"{n_tf} TFs after intersecting chip-atlas filename stems with a "
+            f"curated DNA-binding gene list. ~250 known human TFs are not "
+            f"represented because no chip-atlas data exists for them."
+        )
+    elif f["tf_set"] == "all":
+        coverage = (
+            f"{n_tf} TFs — every chip-atlas antigen resolving to a current "
+            f"GRCh38 gene symbol, not only those on the curated DNA-binding "
+            f"list. TFs with no chip-atlas data remain unrepresented."
+        )
+    else:
+        # Axis unknown: say only what is known rather than claiming either.
+        coverage = (
+            f"{n_tf} TFs. TFs with no chip-atlas data are unrepresented."
+        )
+
+    return [
+        ("Cell-type pooling",
+         "ChIP-atlas aggregates experiments across tissues and cell lines for "
+         "each TF. A peak at a TSS reflects 'observed in *any* assayed "
+         "context', not 'always co-bound'. Cell-type-specific co-binding is "
+         "therefore blurred."),
+        ("Score saturation",
+         "ChIP-atlas peak scores cap at 1,000, and the score = 1,000 subset "
+         "is biased toward universally bound TFs (CTCF/MYC/SP1). "
+         + saturation),
+        ("Annotation dependence",
+         "We restrict to Ensembl_canonical protein-coding transcripts on "
+         "chromosomes 1–22, X, Y, MT. lncRNAs, miRNAs, and non-canonical "
+         "transcripts are out of scope."),
+        ("TF coverage", coverage),
+    ] + _LIMITATIONS_TAIL
+
+
+_LIMITATIONS_TAIL = [
     ("KDE bandwidth choice",
      "σ = 25 bp is matched to ChIP-peak resolution. Smaller σ over-segments; "
      "larger σ merges adjacent sites. Sweeping σ ∈ {15, 25, 50} as a "
@@ -220,6 +329,7 @@ def render() -> None:
     )
 
     m = db.load_manifest()
+    facts = db.build_facts()
 
     # ---- Jump-to table of contents ---------------------------------------
     st.markdown(
@@ -255,7 +365,8 @@ def render() -> None:
                      help="Stage-by-stage breakdown of the upstream analysis "
                           "scripts that fed this viewer.")
         st.dataframe(
-            pd.DataFrame(PIPELINE, columns=["Stage", "Script", "What it does"]),
+            pd.DataFrame(pipeline(facts),
+                          columns=["Stage", "Script", "What it does"]),
             hide_index=True, width="stretch",
             column_config={
                 "Stage": st.column_config.TextColumn(width="small"),
@@ -272,7 +383,7 @@ def render() -> None:
                           "value it is. Re-running with different values "
                           "changes module / program output.")
         st.dataframe(
-            pd.DataFrame(PARAMS_WITH_RATIONALE,
+            pd.DataFrame(params_with_rationale(facts),
                           columns=["Parameter", "Value", "Rationale"]),
             hide_index=True, width="stretch",
             column_config={
@@ -308,7 +419,8 @@ def render() -> None:
                           "before drawing strong claims from any specific "
                           "promoter or program.")
         st.dataframe(
-            pd.DataFrame(LIMITATIONS, columns=["Limitation", "Detail"]),
+            pd.DataFrame(limitations(facts),
+                          columns=["Limitation", "Detail"]),
             hide_index=True, width="stretch",
             column_config={
                 "Limitation": st.column_config.TextColumn(width="small"),
@@ -327,6 +439,14 @@ def render() -> None:
                                   "time.")
                 for k, v in m.get("datasets", {}).items():
                     st.markdown(f"- **{k}**: {v}")
+                if m.get("build"):
+                    st.markdown("**Build axes**")
+                    for k, v in m["build"].items():
+                        st.markdown(f"- `{k}` = `{v}`")
+                if m.get("counts"):
+                    st.markdown("**Counts**")
+                    for k, v in m["counts"].items():
+                        st.markdown(f"- `{k}` = `{db.fmt_count(v)}`")
                 st.markdown(f"*Built at: {m.get('built_at', '?')}*")
         with col2:
             with st.container(border=True):
