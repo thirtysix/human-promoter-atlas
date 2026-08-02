@@ -180,12 +180,60 @@ canonical-promoters/
 │   ├── tabs/                       # one module per top-nav tab
 │   ├── requirements.txt
 │   └── Dockerfile
+├── pipeline/                       # the upstream analysis, previously unversioned
+│   ├── config.py                   # single resolver for paths + build axes
+│   ├── canonical_promoter_aggregate.001.py
+│   ├── tss_modules.001.py          # KDE → modules → module×TF NMF
+│   ├── tss_modules_select_k.001.py # ARI + Brunet cophenetic rank selection
+│   ├── compare_builds.py           # A/B two builds (ARI, program identity)
+│   ├── compare_enrichment.py       # GO-specificity arbiter between builds
+│   ├── splithalf_threshold.py      # per-TF threshold calibration
+│   └── ... (18 analysis scripts in total)
+├── acquire/                        # ChIP-Atlas acquisition, also previously loose
+│   ├── download_chip_atlas.sh      # tier-parameterised fetch (05/10/20/50)
+│   ├── build_tf_list.py            # generates the TF axis
+│   ├── split_by_srx.py             # split peaks by experiment (calibration input)
+│   ├── chip_atlas_antigen_classification.tsv   # 79 non-gene antigens classified
+│   └── tf_list.{all,whitelist}.txt # 1,793 / 1,311 TF axes
+├── hpc/                            # run the heavy half on CSC Roihu
+│   ├── 00_build_env.sh             # venv (no tykky/python-data on Roihu)
+│   ├── 01_stage.sh 02_submit.sh 03_fetch.sh 04_fetch_archive.sh
+│   ├── pipeline.slurm archive.slurm sweep_min_score.slurm splithalf.slurm
+│   └── nmf_init_probe.slurm
+├── docs/
+│   └── threshold-calibration.md    # why MIN_SCORE_ASSIGN=250 and k=10
 ├── .streamlit/
 │   └── config.toml                 # theme (teal primary)
 └── deploy/
     ├── docker-compose.yml          # 127.0.0.1:8501 backend, hardened
     └── nginx-tfbss.conf            # sample nginx vhost
 ```
+
+## The analysis pipeline
+
+`pipeline/` holds the upstream analysis that produces the viewer's inputs. Every
+machine-specific path resolves through `pipeline/config.py`, which reads a
+gitignored `.env` (see `.env.example`) and refuses to run rather than guess:
+
+| env var | what it selects |
+|---|---|
+| `HPA_TIER` | ChIP-Atlas significance tier — `q1e-50` / `q1e-20` / `q1e-10` / `q1e-5` |
+| `HPA_TF_SET` | TF axis — `whitelist` (1,311) or `all` (1,793) |
+| `HPA_MIN_SCORE_ASSIGN` | score a peak needs to *assign* a TF to a module (default 250) |
+| `HPA_CHIP_ATLAS_DIR`, `HPA_GTF`, `HPA_DNA_BINDING`, `HPA_MSIGDB`, `HPA_GTEX_DIR`, `HPA_DEPMAP_DIR` | input locations |
+| `HPA_ANALYSIS_ROOT` / `HPA_OUT_DIR` | where a build lands |
+
+Builds are written to `<root>/<tier>.<tf_set>.s<score>/` so tiers, axes and
+thresholds coexist rather than overwrite, and each carries a `_BUILD.json` stamp
+that downstream steps check before consuming it.
+
+> **ChIP-Atlas numbering trap.** Bulk filenames use `05/10/20/50` (= Q < 1E-0N)
+> while the ChIP-Atlas *website* picker uses `50/100/500/1000` (= −10·log₁₀ Q).
+> They differ by 10×. `pipeline/config.py` holds the only mapping between them.
+
+Peak-heavy stages can run on CSC Roihu via `hpc/` (stage → submit → fetch);
+GTEx, DepMap and the MSigDB enrichments stay local because their raw inputs are
+large and already here.
 
 ## Build the data layer
 
