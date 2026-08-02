@@ -41,3 +41,10 @@ Thumbs.db
 
 # Auto-generated project context for Claude Code
 CLAUDE.md
+
+# Working notes — kept locally, deliberately untracked (see commit-hygiene rule:
+# nothing outside README.md is committed without asking, and handoff notes tend
+# to accumulate whatever was on the desk — private repo names, host paths, the
+# state of unpushed work).
+nextsession.md
+LessonsLearned.md
