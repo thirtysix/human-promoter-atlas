@@ -134,11 +134,24 @@ def main() -> int:
     # 1. positional anchors -- pass/fail
     hdr("1. positional anchors (must not move; failure = wrong, not different)")
     aa, ab = anchors(A), anchors(B)
+    # A build that never ran the aggregate stage has no matrix, which _load and
+    # anchors() both tolerate -- so say which side is missing rather than
+    # formatting a None, and never let a one-sided row read as a passed check.
+    for lab, d, got in ((la, A, aa), (lb, B, ab)):
+        if d["agg"] is None:
+            print(f"  {lab}: no matrices/tf_x_position.binary.parquet "
+                  f"(aggregate stage not run) -- anchors unavailable")
+    fmt = lambda v: f"{v:+.0f}" if v is not None else "--"
     for tf in sorted(set(aa) | set(ab)):
         va, vb = aa.get(tf), ab.get(tf)
-        delta = f"{vb-va:+.0f}" if (va is not None and vb is not None) else "?"
-        flag = "" if (va is None or vb is None or abs(vb - va) <= 25) else "   <-- MOVED >25bp"
-        print(f"  {tf:<6} {la}={va:+.0f}  {lb}={vb:+.0f}  delta={delta} bp{flag}")
+        both = va is not None and vb is not None
+        delta = f"{vb - va:+.0f}" if both else "?"
+        flag = "" if (not both or abs(vb - va) <= 25) else "   <-- MOVED >25bp"
+        if not both:
+            flag = "   <-- NOT CHECKED (one side missing)"
+        print(f"  {tf:<6} {la}={fmt(va)}  {lb}={fmt(vb)}  delta={delta} bp{flag}")
+    if not (aa or ab):
+        print("  no anchors on either side -- this gate did not run")
 
     # 2. TF axis
     hdr("2. TF axis")
