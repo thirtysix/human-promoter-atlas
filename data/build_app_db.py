@@ -51,9 +51,41 @@ import pandas as pd
 ################################################################################
 # Paths ########################################################################
 ################################################################################
-# Override with HPA_ANALYSIS_DIR if the upstream analysis lives elsewhere.
-ANALYSIS_DN = Path(os.environ.get("HPA_ANALYSIS_DIR", "data/raw/analyses"))
 APP_DN      = Path(__file__).resolve().parents[1]
+
+
+def _dotenv(path: Path) -> dict:
+    """Minimal KEY=VALUE reader for the repo-root .env.
+
+    Every pipeline script reads .env through config.py, but this one used plain
+    os.environ, so HPA_ANALYSIS_DIR set in .env was ignored and the default
+    silently applied -- pointing the build at data/raw/analyses instead of the
+    real analysis tree. Not imported from config because that module hard-
+    requires the raw-input paths (GTF, ChIP-Atlas, DNA-binding table) that this
+    packing step never touches.
+    """
+    vals = {}
+    if not path.is_file():
+        return vals
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        vals[key.strip()] = val.strip().strip('"').strip("'")
+    return vals
+
+
+_FILE_ENV = _dotenv(APP_DN / ".env")
+
+
+def _env(name: str, default: str) -> str:
+    """Real environment wins, then .env, then the default."""
+    return os.environ.get(name) or _FILE_ENV.get(name) or default
+
+
+# Override with HPA_ANALYSIS_DIR if the upstream analysis lives elsewhere.
+ANALYSIS_DN = Path(_env("HPA_ANALYSIS_DIR", "data/raw/analyses"))
 DATA_DN     = APP_DN / "data"
 DUCKDB_FN   = DATA_DN / "canonical_promoter.duckdb"
 AGG_DN      = DATA_DN / "aggregate"
