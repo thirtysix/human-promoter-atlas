@@ -45,6 +45,17 @@ SRC="$WORK/out/$BUILD"
 
 echo "[fetch] $REMOTE:$SRC -> $DST"
 
+# Reachability first, and separately from the stamp check. An expired cert makes
+# the ssh below print nothing, which the stamp test then reports as "job did not
+# finish" -- sending you to look at SLURM when the real problem is 24 h of cert
+# validity having run out. Roihu certs are short-lived; say so by name.
+if ! ssh -o BatchMode=yes -o ConnectTimeout=20 "$REMOTE" true 2>/dev/null; then
+  echo "[fetch] cannot reach $REMOTE -- this is a connection/auth failure, not a" >&2
+  echo "        missing build. Roihu certs last 24 h; re-sign with:" >&2
+  echo "        python3 ~/.ssh/csc_cert.py -u <user> ~/.ssh/id_ed25519.pub" >&2
+  exit 1
+fi
+
 # Refuse to fetch a partial build: a silently incomplete result set is the worst
 # outcome, because nothing downstream flags it.
 stamp=$(ssh "$REMOTE" "cat $SRC/_BUILD.json 2>/dev/null")
