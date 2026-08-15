@@ -10,17 +10,33 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [[ -f "$REPO/.env" ]] && set -a && . "$REPO/.env" && set +a
 
 TIER="${HPA_TIER:-q1e-50}"; TF_SET="${HPA_TF_SET:-whitelist}"
-STAGES="aggregate modules"; CHECK_ONLY=0; MEM=""
+STAGES="aggregate modules"; CHECK_ONLY=0; MEM=""; SCORE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --tier) TIER="$2"; shift 2 ;;
     --tf-set) TF_SET="$2"; shift 2 ;;
+    --min-score) SCORE="$2"; shift 2 ;;
     --stages) STAGES="$2"; shift 2 ;;
     --mem) MEM="$2"; shift 2 ;;
     --check-only) CHECK_ONLY=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+
+# The score is the THIRD build axis and it is in the output directory name, so
+# it has to reach the job. It used not to be in --export, which meant
+# pipeline.slurm silently fell back to its own default of 250 and a run asked
+# for s200 would have written s250 -- the build-path divergence this project
+# has already been bitten by twice. Resolve it from config so there is one
+# source of truth, and always pass it explicitly rather than relying on a
+# default at the far end.
+SCORE=$(cd "$REPO/pipeline" && env HPA_TIER="$TIER" HPA_TF_SET="$TF_SET" \
+        ${SCORE:+HPA_MIN_SCORE_ASSIGN="$SCORE"} \
+        python3 -c "import config; print(config.MIN_SCORE_ASSIGN)") \
+  || { echo "[submit] could not resolve MIN_SCORE_ASSIGN from config" >&2; exit 1; }
+BUILD=$(cd "$REPO/pipeline" && env HPA_TIER="$TIER" HPA_TF_SET="$TF_SET" \
+        HPA_MIN_SCORE_ASSIGN="$SCORE" \
+        python3 -c "import config,os; print(os.path.basename(config.OUT_DN))")
 
 PROJ="${HPA_CSC_PROJECT:-}"
 [[ -n "$PROJ" ]] || { echo "need HPA_CSC_PROJECT in .env" >&2; exit 2; }
@@ -31,7 +47,8 @@ VENV="/projappl/$PROJ/hpa_venv"
 fail=0
 say () { printf "  %-34s %s\n" "$1" "$2"; }
 
-echo "[preflight] $REMOTE  tier=$TIER tf_set=$TF_SET stages='$STAGES'"
+echo "[preflight] $REMOTE  tier=$TIER tf_set=$TF_SET min_score=$SCORE stages='$STAGES'"
+echo "[preflight] build dir -> $BUILD"
 
 # 1. Reachability. A stale SSH certificate is the single most common blocker --
 #    Roihu certs last 24 h -- so say exactly how to fix it.
@@ -81,7 +98,7 @@ JOBID=$(ssh "$REMOTE" "bash -lc '
   cd $WORK &&
   export SBATCH_ACCOUNT=$PROJ &&
   sbatch --parsable $MEM_ARG \
-    --export=ALL,WORK=$WORK,HPA_TIER=$TIER,HPA_TF_SET=$TF_SET,HPA_CSC_PROJECT=$PROJ,STAGES=\"$STAGES\" \
+    --export=ALL,WORK=$WORK,HPA_TIER=$TIER,HPA_TF_SET=$TF_SET,HPA_MIN_SCORE_ASSIGN=$SCORE,HPA_CSC_PROJECT=$PROJ,STAGES=\"$STAGES\" \
     $WORK/hpc/pipeline.slurm
 '")
 [[ -n "$JOBID" ]] || { echo "[submit] sbatch returned no job id" >&2; exit 1; }
