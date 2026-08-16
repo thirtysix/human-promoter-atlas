@@ -58,7 +58,13 @@ cp "$WORK/data/chip-atlas/chip_atlas_antigen_classification.tsv" "$SPLIT/B/" 2>/
 cd "$WORK/code/pipeline" || exit 1
 rc=0
 for H in A B; do
-  OUT="$WORK/out/splithalf.$H"
+  # The halves MUST carry the axes. This was "splithalf.$H", which collides
+  # across tiers: a q1e-20 run found the q1e-5 halves' .scan.done, printed
+  # [skip], exited 0, and left splithalf_threshold.py comparing q1e-20 modules
+  # against q1e-5 scans -- plausible numbers, silently wrong. The assignment
+  # score is deliberately NOT in the name: splithalf_threshold.py reads
+  # peaks.parquet and thresholds in memory, so one scan serves every score.
+  OUT="$WORK/out/splithalf.${TIER}.${TF_SET}.$H"
   if [[ -f "$OUT/.scan.done" ]]; then echo "[skip] scan $H (done)"; continue; fi
   n=$(ls -1 "$SPLIT/$H/per_TF/$TIER"/*.bed.gz 2>/dev/null | wc -l)
   echo "[run ] scan half $H  ($n beds)"
@@ -74,7 +80,14 @@ done
 
 echo "=== finished rc=$rc ==="
 for H in A B; do
-  f="$WORK/out/splithalf.$H/tss_modules/peaks.parquet"
-  [[ -f "$f" ]] && printf "  half %s peaks.parquet %s\n" "$H" "$(du -h "$f" | cut -f1)"
+  d="$WORK/out/splithalf.${TIER}.${TF_SET}.$H"
+  f="$d/tss_modules/peaks.parquet"
+  [[ -f "$f" ]] && printf "  half %s %s  peaks.parquet %s\n" \
+    "$H" "$(basename "$d")" "$(du -h "$f" | cut -f1)"
 done
+echo "  compare with:"
+echo "    python pipeline/splithalf_threshold.py \\"
+echo "      --modules <build>/tss_modules \\"
+echo "      --half-a  out/splithalf.${TIER}.${TF_SET}.A/tss_modules \\"
+echo "      --half-b  out/splithalf.${TIER}.${TF_SET}.B/tss_modules"
 exit $rc
