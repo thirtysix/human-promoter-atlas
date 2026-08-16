@@ -93,7 +93,18 @@ echo "[preflight] all clear"
 # default 8 cores / 16 GiB both terms are 6 BU/h, which is the cheapest shape
 # for this many cores; raising --mem past 2 GiB/core only inflates the bill.
 MEM_ARG=""; [[ -n "$MEM" ]] && MEM_ARG="--mem=$MEM"
-echo "[submit] 8 cores${MEM:+ / $MEM} -- est. ~3-6 BU for a 0.5 h run"
+# Compute the rate rather than printing a constant. This line used to read
+# "est. ~3-6 BU for a 0.5 h run" regardless of --mem, which understates the
+# cost 4x at --mem 64G -- exactly when you most want to know.
+CORES=8
+MEM_GIB=$(awk -v m="${MEM:-16G}" 'BEGIN{
+  gsub(/[Gg]$/,"",m); gsub(/[Mm]$/,"",m2);
+  if (m ~ /[0-9]$/) printf "%d", m; else printf "16"}')
+RATE=$(awk -v c="$CORES" -v g="$MEM_GIB" 'BEGIN{
+  a=0.75*c; b=0.375*g; printf "%.1f", (a>b?a:b)}')
+echo "[submit] $CORES cores / ${MEM:-16G} -- ${RATE} BU/h "\
+"(~$(awk -v r="$RATE" 'BEGIN{printf "%.0f", r*0.5}') BU for 30 min, "\
+"$(awk -v r="$RATE" 'BEGIN{printf "%.0f", r}') BU for 1 h)"
 JOBID=$(ssh "$REMOTE" "bash -lc '
   cd $WORK &&
   export SBATCH_ACCOUNT=$PROJ &&
