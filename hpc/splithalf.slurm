@@ -9,8 +9,13 @@
 #SBATCH --partition=small
 #SBATCH --job-name=hpa-splithalf
 #SBATCH --time=06:00:00
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=48G
+# 8 cpus, not 16. The scan's memory scales with worker count -- each holds its
+# TF's peak records -- and on the 1,793-TF axis 16 workers exceeded 48G partway
+# through half A, while 8 workers scanned the full 1,793-TF build inside 20G.
+# Sixteen was also SLOWER once it started thrashing: 400 TFs in 88s against
+# 1,793 in 51s at eight. More workers is not more throughput here.
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
 
