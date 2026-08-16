@@ -101,6 +101,10 @@ def main() -> int:
     ap.add_argument("--from", dest="src_tier", required=True)
     ap.add_argument("--to", dest="dst_tier", required=True)
     ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
+    ap.add_argument("--dest", help="write here instead of <chip_atlas>/per_TF/<to>; "
+                                   "must still end in the tier name")
+    ap.add_argument("--force", action="store_true",
+                    help="replace a DOWNLOADED tier (destructive)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -115,10 +119,31 @@ def main() -> int:
             f"derived: the peaks it needs are not in the source file.")
 
     src_dn = CHIP_ATLAS_DN / "per_TF" / args.src_tier
-    dst_dn = CHIP_ATLAS_DN / "per_TF" / args.dst_tier
+    dst_dn = Path(args.dest) if args.dest else CHIP_ATLAS_DN / "per_TF" / args.dst_tier
+    if dst_dn.name != args.dst_tier:
+        raise SystemExit(
+            f"--dest must end in the tier name: {dst_dn} does not end in "
+            f"{args.dst_tier!r}. config.py enforces the same rule, and it is "
+            f"what stops a build being labelled with the wrong tier.")
     beds = sorted(src_dn.glob("*.bed.gz"))
     if not beds:
         raise SystemExit(f"no *.bed.gz under {src_dn}")
+
+    # Never silently replace a DOWNLOADED tier. q1e-50 holds the peaks the
+    # published atlas was built from; overwriting it with a derived set would
+    # destroy the only copy of a different processing run (the bulk files use
+    # ~1.4x narrower intervals) and no downstream check would notice.
+    existing = list(dst_dn.glob("*.bed.gz")) if dst_dn.is_dir() else []
+    if existing and not (dst_dn / "_DERIVED.json").is_file() and not args.force:
+        raise SystemExit(
+            f"{dst_dn} already holds {len(existing):,} beds and has no "
+            f"_DERIVED.json, so it was DOWNLOADED, not derived. Refusing to "
+            f"overwrite it.\n"
+            f"  To derive this tier without touching the download, write it "
+            f"elsewhere and point the pipeline at it:\n"
+            f"    --dest <somewhere>/per_TF_derived/{args.dst_tier}\n"
+            f"    HPA_PER_TF_DIR=<somewhere>/per_TF_derived/{args.dst_tier}\n"
+            f"  Use --force only if you intend to replace the download.")
 
     print(f"deriving {args.dst_tier} (score>={d_score}) from {args.src_tier} "
           f"(score>={s_score})")
