@@ -93,7 +93,14 @@ MIN_PEAK_DIST_BP    = 50         # min separation between distinct module center
 
 VALID_CHROMS        = {str(c) for c in list(range(1, 23)) + ["X", "Y", "MT"]}
 
-KS                  = [8, 12, 15, 20]
+# Ranks to factorize. Overridable because some consumers want the module scan
+# and nothing else: the split-half analysis reads only peaks.parquet and
+# tf_index.tsv, so its four NMF fits were pure waste -- and on the 1,793-TF axis
+# the mu solver's dense ~100k x 1,793 intermediates are what pushed that job
+# out of memory. HPA_KS="" runs the scan and skips factorization entirely.
+KS                  = [int(k) for k in
+                       os.environ.get("HPA_KS", "8,12,15,20").split(",")
+                       if k.strip()]
 NMF_MAX_ITER        = 300
 NMF_RANDOM_STATE    = 0
 TOP_TFS_PER_PROGRAM = 30
@@ -855,11 +862,17 @@ def main():
             log(f"  P{p+1} (n_dom={n_dom:5d}, med_center={med_pos:+5d}, "
                 f"med_width={med_wid:4d}): {', '.join(tfs_top)}")
 
-    plot_reconstruction_error(errs, n_module, n_tf, M.nnz,
-                              str(plots_dn / "nmf_reconstruction_error"))
-    pd.DataFrame({"k": list(errs.keys()),
-                  "frobenius_err": list(errs.values())}).to_csv(
-        out_root / "nmf_reconstruction_error.tsv", sep="\t", index=False)
+    # Skipped entirely when HPA_KS="" -- there is no error curve to plot or
+    # write, and an empty frame here would either crash the plot or leave a
+    # header-only TSV that looks like a finished factorization.
+    if errs:
+        plot_reconstruction_error(errs, n_module, n_tf, M.nnz,
+                                  str(plots_dn / "nmf_reconstruction_error"))
+        pd.DataFrame({"k": list(errs.keys()),
+                      "frobenius_err": list(errs.values())}).to_csv(
+            out_root / "nmf_reconstruction_error.tsv", sep="\t", index=False)
+    else:
+        log("NMF skipped (HPA_KS empty) -- modules + peaks.parquet only")
 
     log("DONE")
     log_fh.close()

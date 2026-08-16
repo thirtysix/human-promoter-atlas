@@ -76,7 +76,11 @@ for H in A B; do
   echo "[run ] scan half $H  ($n beds)"
   [[ "$n" -ge "$HPA_MIN_BEDS" ]] || { echo "FATAL: only $n beds in half $H (floor $HPA_MIN_BEDS)" >&2; rc=1; break; }
   t0=$SECONDS
-  if HPA_CHIP_ATLAS_DIR="$SPLIT/$H" HPA_OUT_DIR="$OUT" "$PY" tss_modules.001.py; then
+  # HPA_KS="" -- splithalf_threshold.py reads only peaks.parquet and
+  # tf_index.tsv, so the four NMF fits were computed and discarded. On the
+  # 1,793-TF axis their dense intermediates are what put this job over 48G.
+  if HPA_CHIP_ATLAS_DIR="$SPLIT/$H" HPA_OUT_DIR="$OUT" HPA_KS="" \
+     "$PY" tss_modules.001.py; then
     echo "ok" > "$OUT/.scan.done"
     echo "[done] half $H in $((SECONDS-t0))s"
   else
