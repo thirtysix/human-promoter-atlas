@@ -39,14 +39,20 @@ export HPA_MIN_BEDS="${HPA_MIN_BEDS:-500}"
 echo "=== hpa-splithalf ${SLURM_JOB_ID:-local} tier=$TIER cpus=$HPA_WORKERS ==="
 
 # --- 1. split by experiment -------------------------------------------------
-if [[ -f "$SPLIT/.split.done" ]]; then
-  echo "[skip] split (done)"
+# The split TREES are per-tier ($SPLIT/$H/per_TF/$TIER), but the marker used to
+# be a single $SPLIT/.split.done shared by every tier. So a second tier found
+# the first tier's marker, skipped the split, and then had 0 beds of its own --
+# caught here only because the HPA_MIN_BEDS floor is checked below. Key the
+# marker on the same axes as the tree it certifies.
+SPLIT_MARK="$SPLIT/.split.${TIER}.${TF_SET}.done"
+if [[ -f "$SPLIT_MARK" ]]; then
+  echo "[skip] split (done for $TIER/$TF_SET)"
 else
-  echo "[run ] split_by_srx"
+  echo "[run ] split_by_srx  tier=$TIER tf_set=$TF_SET"
   HPA_CHIP_ATLAS_DIR="$WORK/data/chip-atlas" HPA_ANALYSIS_ROOT="$WORK/out" \
     "$PY" "$WORK/code/acquire/split_by_srx.py" --tier "$TIER" --out "$SPLIT" \
     || { echo "FATAL: split failed" >&2; exit 1; }
-  echo "ok" > "$SPLIT/.split.done"
+  echo "ok $(date -Is)" > "$SPLIT_MARK"
 fi
 
 # The halves must carry the rename table too, or config resolves no renames and
