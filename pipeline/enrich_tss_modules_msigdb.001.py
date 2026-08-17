@@ -36,7 +36,7 @@ import seaborn as sns
 from scipy.stats import hypergeom
 
 # Machine-specific paths and build axes -> pipeline/config.py
-from config import MSIGDB_FN, OUT_DN
+from config import MSIGDB_FN, OUT_DN, K_CANONICAL
 
 
 ################################################################################
@@ -45,7 +45,9 @@ from config import MSIGDB_FN, OUT_DN
 MODULES_DN = OUT_DN / "tss_modules"
 ENRICH_DN  = OUT_DN / "enrichment_msigdb_gobp_modules"
 
-KS         = [8, 10, 12, 15, 20]
+# Always include the canonical rank, or the app's GO tab silently has no
+# terms for the rank it actually displays.
+KS         = sorted({8, 10, 12, 15, 20, K_CANONICAL})
 TOP_N_TERMS = 5         # for dotplot
 TOP_N_PER_PROGRAM = 15  # for summary table
 QVAL_CUTOFF = 0.05

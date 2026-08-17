@@ -135,6 +135,23 @@ if not 0 <= MIN_SCORE_ASSIGN <= 1000:
         f"config: HPA_MIN_SCORE_ASSIGN={MIN_SCORE_ASSIGN} out of range 0-1000 "
         f"(score is -10*log10(Q), capped at 1000)")
 
+# The NMF rank the atlas presents. It was 10 in six separate places -- the
+# archetype stage, the module enrichment rank list, two GTEx scripts, the
+# summary workbook and build_app_db -- so raising it meant the consensus fit
+# wrote nmf.k18.* while everything downstream kept reading nmf.k10.*, mixing
+# two ranks with no error. One name, read from here.
+#
+# 10 remains the default: it is the rank of the published 1,304-TF atlas and
+# re-running that build must reproduce it. It is NOT the right rank for the
+# 1,793-TF axis. Held-out imputation (nmf_holdout_cv.py) puts k=10 about five
+# fold-sd below the plateau, and the one-standard-error rule over held-out AUC
+# selects k=18; external complex recovery (nmf_complex_recovery.py) agrees that
+# k<=10 under-fits. At k=10 on that axis cohesin, the E-box factors and the
+# pausing machinery are forced to share components and swap between seeds.
+K_CANONICAL = int(optional("HPA_K_CANONICAL", "10"))
+if not 2 <= K_CANONICAL <= 100:
+    raise SystemExit(f"config: HPA_K_CANONICAL={K_CANONICAL} out of range 2-100")
+
 
 ################################################################################
 # Paths ########################################################################

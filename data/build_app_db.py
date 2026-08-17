@@ -91,7 +91,12 @@ DUCKDB_FN   = DATA_DN / "canonical_promoter.duckdb"
 AGG_DN      = DATA_DN / "aggregate"
 MANIFEST_FN = DATA_DN / "manifest.json"
 
-K_CANONICAL = 10  # algorithmically-selected program count
+# Must match the rank the build was actually factorized at. Kept as an env
+# read rather than a literal because raising the rank otherwise packages
+# nmf.k10.* tables into an app whose build has none -- or, worse, stale ones.
+# Mirrors pipeline/config.py's HPA_K_CANONICAL; the default stays 10 so the
+# published 1,304-TF atlas repackages unchanged.
+K_CANONICAL = int(_env("HPA_K_CANONICAL", "10"))
 ARCHETYPE_DN = ANALYSIS_DN / "tss_archetypes"
 ARCHETYPE_GO_DN = ANALYSIS_DN / "enrichment_msigdb_gobp_archetypes"
 

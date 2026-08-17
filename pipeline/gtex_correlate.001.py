@@ -41,7 +41,7 @@ import numpy as np
 import pandas as pd
 
 # Machine-specific paths and build axes -> pipeline/config.py
-from config import OUT_DN
+from config import OUT_DN, K_CANONICAL
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -56,7 +56,7 @@ TX_MEAN_FN  = GTEX_DN / "transcript_tissue_mean.parquet"
 TSS_FN      = ROOT / "tss_modules" / "tss_table.tsv"
 TF_INDEX_FN = ROOT / "tss_modules" / "tf_index.tsv"
 MODULES_FN  = ROOT / "tss_modules" / "modules.tsv"
-MP_K10_FN   = ROOT / "tss_modules" / "nmf.k10.module_program.tsv"
+MP_K10_FN   = ROOT / "tss_modules" / f"nmf.k{K_CANONICAL}.module_program.tsv"
 PEAKS_FN    = ROOT / "tss_modules" / "peaks.parquet"
 
 DECIMALS    = 2

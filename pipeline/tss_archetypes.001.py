@@ -46,7 +46,7 @@ from sklearn.metrics import adjusted_rand_score
 
 # Machine-specific paths and build axes -> pipeline/config.py
 import nmf_fit
-from config import OUT_DN
+from config import OUT_DN, K_CANONICAL
 
 
 ################################################################################
@@ -56,7 +56,7 @@ ROOT                = OUT_DN   # config.OUT_DN
 MOD_DN     = ROOT / "tss_modules"
 OUT_DN     = ROOT / "tss_archetypes"
 PLOTS_DN   = OUT_DN / "plots"
-K_PROGRAMS = 10
+K_PROGRAMS = K_CANONICAL      # rank the archetype layer sits on top of
 A_CANDIDATES = [4, 5, 6, 7, 8, 9]
 N_SEEDS    = 20
 NMF_MAX_ITER = 300

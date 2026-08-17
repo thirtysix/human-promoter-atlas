@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 
 # Machine-specific paths and build axes -> pipeline/config.py
-from config import OUT_DN
+from config import OUT_DN, K_CANONICAL
 
 
 ################################################################################
@@ -160,7 +160,7 @@ def load_modules_k_top_go(k: int, top_n: int = 10) -> pd.DataFrame:
     return df
 
 
-def load_top_gene_configs(k: int = 10, top_n: int = 30) -> pd.DataFrame:
+def load_top_gene_configs(k: int = K_CANONICAL, top_n: int = 30) -> pd.DataFrame:
     fn = MODULES_DN / f"nmf.k{k}.gene_configurations.tsv"
     if not fn.exists():
         return pd.DataFrame()
@@ -184,13 +184,13 @@ def make_readme() -> pd.DataFrame:
         ("03_TFcluster_GO_filtered", "Top-5 GO BP terms per filtered TF cluster (genome_bg)."),
         ("04_TSS_programs_k8",       "Single-window (±100 bp) NMF k=8 program summary, top TFs and top genes."),
         ("05_modules_k_selection",   "Algorithmic k selection: median ARI, Brunet cophenetic ρ, dispersion, mean Frobenius error per k. 'preferred' marks the k with peak stability."),
-        ("06_modules_k10",           "Canonical k=10 program summary (algorithmically selected): n_modules, median position, median width, mean dominant weight, top TFs, auto reading."),
-        ("07_modules_k10_GO",        "Top-10 GO BP terms per k=10 program. genome_bg = MSigDB universe."),
+        (f"06_modules_k{K_CANONICAL}", f"Canonical k={K_CANONICAL} program summary (algorithmically selected): n_modules, median position, median width, mean dominant weight, top TFs, auto reading."),
+        (f"07_modules_k{K_CANONICAL}_GO", f"Top-10 GO BP terms per k={K_CANONICAL} program. genome_bg = MSigDB universe."),
         ("08_modules_k8",            "Alt k=8 program summary for comparison."),
         ("09_modules_k12",           "Alt k=12 program summary."),
         ("10_modules_k15",           "Alt k=15 program summary."),
         ("11_modules_k20",           "Alt k=20 program summary."),
-        ("12_top_gene_configs_k10",  "Most frequent gene configurations: program_path = ordered list of dominant programs across a gene's modules. Top 30 by gene count."),
+        (f"12_top_gene_configs_k{K_CANONICAL}", "Most frequent gene configurations: program_path = ordered list of dominant programs across a gene's modules. Top 30 by gene count."),
         ("",                         ""),
         ("Notes",                    ""),
         ("",                         "Per-program GO term files with full genes_in_overlap lists are at enrichment_msigdb_gobp_modules/k{K}/program{P}.gobp.tsv"),
@@ -227,13 +227,13 @@ def main():
             "03_TFcluster_GO_filtered": load_tfcluster_top_go(TFCLUSTER_GO_FILT_DN, top_n=5),
             "04_TSS_programs_k8":      load_tss_programs_summary(PROGRAMS_K8_SUM),
             "05_modules_k_selection":  load_k_selection(),
-            "06_modules_k10":          load_modules_summary(10),
-            "07_modules_k10_GO":       load_modules_k_top_go(10, top_n=10),
+            f"06_modules_k{K_CANONICAL}":    load_modules_summary(K_CANONICAL),
+            f"07_modules_k{K_CANONICAL}_GO": load_modules_k_top_go(K_CANONICAL, top_n=10),
             "08_modules_k8":           load_modules_summary(8),
             "09_modules_k12":          load_modules_summary(12),
             "10_modules_k15":          load_modules_summary(15),
             "11_modules_k20":          load_modules_summary(20),
-            "12_top_gene_configs_k10": load_top_gene_configs(10, top_n=30),
+            f"12_top_gene_configs_k{K_CANONICAL}": load_top_gene_configs(K_CANONICAL, top_n=30),
         }
         for name, df in sheets.items():
             if df is None or df.empty:
