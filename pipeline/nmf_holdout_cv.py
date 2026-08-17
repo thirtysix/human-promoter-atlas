@@ -141,6 +141,14 @@ def main() -> int:
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     ranks = [int(r) for r in args.ranks.split(",") if r.strip()]
+    if len(ranks) < 3:
+        raise SystemExit(
+            f"--ranks gave {len(ranks)} rank(s): {ranks}. Refusing to run.\n"
+            f"  Selecting a 'best' rank from fewer than 3 points is meaningless,\n"
+            f"  and this is a silent-failure trap: sbatch --export is COMMA\n"
+            f"  separated, so --export=...,RANKS=\"5,8,10\" arrives as RANKS=5\n"
+            f"  and the job reports a confident best-of-one. Export RANKS in the\n"
+            f"  submitting shell and use --export=ALL instead.")
 
     root = OUT_DN / "tss_modules"
     M = sp.load_npz(str(root / "occupancy.modules.npz")).tocsr()
