@@ -437,6 +437,67 @@ def read_peak_beds(paths):
 # Written into every output root so a downstream consumer can prove which build
 # it is reading, instead of inferring it from a directory name someone renamed.
 STAMP_NAME = "_BUILD.json"
+ANALYSIS_STAMP = "_ANALYSIS.json"
+
+
+def analysis_dir(kind: str, **axes) -> Path:
+    """Directory for a NON-BUILD analysis, named by every axis that defines it.
+
+    Exploratory analyses were landing inside the build directory they read from
+    (genome_modules/ inside q1e-5.all.s250/), which conflates two different
+    things and means a re-run at different parameters silently overwrites a
+    result that may have been worth keeping. Same failure the build path had:
+    if the name does not carry the axes, two runs collide.
+
+    Every axis goes in the name, so parameter sweeps sit side by side:
+
+        analysis_dir("genome", sup=2)  ->  genome.q1e-5.all.s250.sup2
+        analysis_dir("genome", sup=5)  ->  genome.q1e-5.all.s250.sup5
+    """
+    parts = [kind, TIER, TF_SET, f"s{MIN_SCORE_ASSIGN}"]
+    parts += [f"{k}{v}" for k, v in sorted(axes.items())]
+    return ANALYSIS_ROOT / ".".join(parts)
+
+
+def write_analysis_readme(out_dn: Path, title: str, rationale: str,
+                          params: dict, stats: dict | None = None,
+                          inputs: dict | None = None) -> Path:
+    """Machine stamp + human README for an analysis directory.
+
+    The README exists so a directory found months later explains itself: what
+    was run, against what, why, and what came out. The JSON stamp is what other
+    code should read.
+    """
+    import json as _json
+    from datetime import datetime as _dt
+    out_dn = Path(out_dn)
+    out_dn.mkdir(parents=True, exist_ok=True)
+    stamp = {
+        "title": title, "written_at": _dt.now().isoformat(timespec="seconds"),
+        "tier": TIER, "tf_set": TF_SET, "min_score_assign": MIN_SCORE_ASSIGN,
+        "k_canonical": K_CANONICAL,
+        "params": params, "inputs": inputs or {}, "stats": stats or {},
+    }
+    (out_dn / ANALYSIS_STAMP).write_text(_json.dumps(stamp, indent=2) + "\n")
+
+    def _tbl(d):
+        return "\n".join(f"| `{k}` | {v} |" for k, v in d.items()) if d else "| | |"
+    md = [f"# {title}", "",
+          f"_Generated {stamp['written_at']} by the pipeline; do not hand-edit "
+          f"(regenerated on re-run)._", "",
+          "## Why", "", rationale.strip(), "",
+          "## Build axes", "", "| axis | value |", "|---|---|",
+          f"| `tier` | {TIER} |", f"| `tf_set` | {TF_SET} |",
+          f"| `min_score_assign` | {MIN_SCORE_ASSIGN} |",
+          f"| `k_canonical` | {K_CANONICAL} |", "",
+          "## Parameters", "", "| parameter | value |", "|---|---|", _tbl(params), ""]
+    if inputs:
+        md += ["## Inputs", "", "| input | value |", "|---|---|", _tbl(inputs), ""]
+    if stats:
+        md += ["## Results", "", "| statistic | value |", "|---|---|", _tbl(stats), ""]
+    (out_dn / "README.md").write_text("\n".join(md) + "\n")
+    return out_dn / "README.md"
+
 
 
 def build_stamp(n_tf: int | None = None) -> dict:
