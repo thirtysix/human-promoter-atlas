@@ -82,7 +82,16 @@ _spec.loader.exec_module(_tssmod)
 _detect_modules_density = _tssmod._detect_modules_density
 
 KDE_BW           = 25
-MIN_SUPPORT      = 2
+# Calibrated by circular-shift null over chr1-22,X (genome_support_null.py,
+# job 708621): FDR crosses 5% between floor 9 (0.103) and floor 10 (0.049).
+# 11 rather than 10 because that null shifts each TF independently, so it does
+# not model co-binding driven by shared chromatin accessibility -- every FDR it
+# reports is a LOWER bound, and floor 10 sits at 0.0490 against a 0.05 target
+# with no margin at all. 11 costs 8.3% of retained elements and halves the rate
+# to 0.023. The pilot on chr20-22 alone said 11 independently.
+# NOT 2: that was calibrated for dense promoter windows, and genome-wide it
+# carries FDR 3.83 -- the null produces ~4x more 2-TF elements than real data.
+MIN_SUPPORT      = 11
 BOUNDARY_FRAC    = 0.20
 MIN_PEAK_DIST_BP = 50
 RECENTER_HALF    = 12
@@ -133,6 +142,9 @@ def main() -> int:
                     help="merge peak midpoints into a region when gap <= this")
     ap.add_argument("--cluster-gap", type=int, default=12500,
                     help="element clustering distance (super-enhancer scale)")
+    ap.add_argument("--min-support", type=int, default=MIN_SUPPORT,
+                    help=f"TFs required per element (default {MIN_SUPPORT}, "
+                         "calibrated; the output directory is named by it)")
     ap.add_argument("--stage", choices=["regions", "all"], default="all")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--out", default=None)
@@ -146,7 +158,7 @@ def main() -> int:
     # the promoter build it reads from, and never colliding with a run at
     # different parameters.
     out_dn = (Path(args.out) if args.out else
-              analysis_dir("genome", sup=MIN_SUPPORT, nbhd=NBHD_BP,
+              analysis_dir("genome", sup=args.min_support, nbhd=NBHD_BP,
                            chr="-".join(chroms)))
     if out_dn.exists() and any(out_dn.iterdir()) and not args.force:
         raise SystemExit(
@@ -227,7 +239,7 @@ def main() -> int:
         np.add.at(grid, pos, w_)
         dens = gaussian_filter1d(grid, KDE_BW, mode="constant")
         del grid
-        found = _detect_modules_density(dens, KDE_BW, MIN_SUPPORT,
+        found = _detect_modules_density(dens, KDE_BW, args.min_support,
                                         BOUNDARY_FRAC, MIN_PEAK_DIST_BP)
         _log(f"  chr{cname}: {len(sel):,} peaks, {n/1e6:.1f} Mb grid, "
              f"{len(found):,} candidate elements ({time.time()-t1:.0f}s)")
@@ -237,7 +249,7 @@ def main() -> int:
                 continue
             tt, vv = t_[i0:i1], v_[i0:i1]
             supp = np.unique(tt)
-            if supp.size < MIN_SUPPORT:
+            if supp.size < args.min_support:
                 continue
             assigned = np.unique(tt[vv >= MIN_SCORE_ASSIGN])
             rows.append((eid, cname, int(a), int(b), int(pk), int(b - a + 1),
@@ -314,12 +326,19 @@ def main() -> int:
             "reimplemented), so promoter-stratum elements should reproduce the "
             "modules found by the promoter pipeline. That correspondence is the "
             "regression check.\n\n"
+            "The support floor is calibrated against a circular-shift null "
+            "(`genome_support_null.py`) rather than assumed: genome-wide, a "
+            "floor of 2 carries FDR 3.83 because the null generates ~4x more "
+            "two-TF elements than real data. FDR crosses 5% between 9 (0.103) "
+            "and 10 (0.049).\n\n"
             "**Read the median TF counts below before trusting any distal "
-            "program.** MIN_SUPPORT was calibrated for dense promoter windows; "
-            "if distal elements sit at the support floor they are two-TF "
-            "coincidences, and an NMF on them will produce 'distal-specific' "
-            "programs that are artifacts of sparsity."),
-        params={"min_support": MIN_SUPPORT, "min_score_assign": MIN_SCORE_ASSIGN,
+            "program.** That null shifts each TF independently, so it does not "
+            "model co-binding driven by shared chromatin accessibility and its "
+            "FDRs are lower bounds. Distal elements also carry fewer TFs by "
+            "nature, so a 'distal-specific' program may only be the program "
+            "that captures low-complexity elements -- re-check any such claim "
+            "on elements matched for n_tfs_assigned."),
+        params={"min_support": args.min_support, "min_score_assign": MIN_SCORE_ASSIGN,
                 "kde_bw": KDE_BW, "boundary_frac": BOUNDARY_FRAC,
                 "min_peak_dist_bp": MIN_PEAK_DIST_BP,
                 "nbhd_bp (per-TF local weight)": NBHD_BP,
