@@ -48,3 +48,6 @@ CLAUDE.md
 # state of unpushed work).
 nextsession.md
 LessonsLearned.md
+
+# Fetched analysis outputs (165 MB+; regenerate on the cluster)
+analysis/
