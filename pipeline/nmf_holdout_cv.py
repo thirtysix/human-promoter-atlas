@@ -70,6 +70,14 @@ from pathlib import Path
 from config import OUT_DN, TIER, TF_SET, MIN_SCORE_ASSIGN
 
 EPS = 1e-10
+# Same disjoint range nmf_fit.py uses, so a retry seed here can never
+# collide with another slot's seed and turn two independent fits into one.
+_RETRY_BASE = 100_000
+# A reconstruction of a 0/1 matrix that predicts an order of magnitude beyond
+# the data range is extrapolating, not fitting. Healthy fits measured here max
+# out at 6-9; diverged ones at 76-8,729, so the gap is wide and the exact
+# multiple is not load bearing.
+RECON_BOUND = 10.0
 
 
 def _log(msg):
@@ -79,10 +87,30 @@ def _log(msg):
 ################################################################################
 # Masked NMF ###################################################################
 ################################################################################
-def masked_nmf(X, O, k, seed, max_iter=200, tol=1e-5):
+def masked_nmf(X, O, k, seed, max_iter=200, tol=1e-5, l2=0.0):
     """Frobenius NMF fitted only on entries where O == 1.
 
-    X, O are dense float32 [n x m]. Returns (W, H).
+    X, O are dense float32 [n x m]. Returns (W, H, err, collapsed), where err is
+    the masked reconstruction error and `collapsed` marks a fit that must not be
+    used -- see masked_nmf_stable.
+
+    Two guards the original lacked, both of which this solver needs and
+    sklearn's (used via nmf_fit.py) provides for the unmasked case:
+
+    SCALE GAUGE. Frobenius NMF is invariant to W -> WD, H -> D^-1 H for any
+    positive diagonal D, so the factor scales are unidentified. Unmasked
+    multiplicative updates hold them in rough balance on their own; under a mask
+    they need not, and in float32 the two can drift apart without bound. Each
+    column of W is renormalised to unit L2 with the scale pushed into H, which
+    leaves W @ H bit-for-bit unchanged -- it fixes the gauge, not the objective.
+
+    EPS ON BOTH SIDES. EPS was on the denominator only, so once a row of
+    R @ H.T decayed toward it the multiplier went to numerator/1e-10 and the
+    factor exploded. Measured on the genome matrix before this fix, held-out
+    RMSE reached 3.01 at k=40 against 0.153 for predicting all zeros -- a fit
+    twenty times worse than the trivial predictor. AUC stayed at 0.965
+    throughout, because AUC reads only the ordering and a diverged fit can still
+    rank entries correctly. Nothing in the loop noticed.
     """
     rng = np.random.default_rng(seed)
     n, m = X.shape
@@ -90,18 +118,63 @@ def masked_nmf(X, O, k, seed, max_iter=200, tol=1e-5):
     W = np.abs(rng.normal(scale=scale, size=(n, k))).astype(np.float32) + EPS
     H = np.abs(rng.normal(scale=scale, size=(k, m))).astype(np.float32) + EPS
     OX = O * X
+    baseline = float(np.linalg.norm(OX))      # error of predicting all zeros
+    xmax = float(X.max()) or 1.0
     prev = None
+    err = np.inf
     for it in range(max_iter):
         R = O * (W @ H)
-        W *= (OX @ H.T) / (R @ H.T + EPS)
+        W *= (OX @ H.T + EPS) / (R @ H.T + l2 * W + EPS)
         R = O * (W @ H)
-        H *= (W.T @ OX) / (W.T @ R + EPS)
+        H *= (W.T @ OX + EPS) / (W.T @ R + l2 * H + EPS)
+        # Fix the scale gauge. (W/d) @ (d*H) == W @ H exactly, so this changes
+        # nothing the objective can see and keeps both factors near unit scale.
+        d = np.linalg.norm(W, axis=0) + EPS
+        W /= d
+        H *= d[:, None]
         if it % 25 == 24:
             err = float(np.linalg.norm(OX - O * (W @ H)))
+            if not np.isfinite(err):
+                return W, H, err, True
             if prev is not None and abs(prev - err) / max(prev, EPS) < tol:
                 break
             prev = err
-    return W, H
+    if not np.isfinite(err):
+        err = float(np.linalg.norm(OX - O * (W @ H)))
+    # A fit no better than predicting all zeros on the observed entries is
+    # degenerate, whatever its AUC says.
+    # The masked objective constrains W @ H ONLY where O == 1, so a fit can be
+    # healthy on the entries it is scored on and arbitrary everywhere else.
+    # Measured at k=45-60 on the genome matrix: training error fell smoothly
+    # (376 -> 361 against a 559 all-zeros baseline) while max(W @ H) reached
+    # 8,729 on a 0/1 matrix and held-out RMSE reached 8.3. Training error
+    # cannot see this; the reconstruction range can, and reading it leaks no
+    # held-out label -- it is a property of the fitted model alone.
+    collapsed = ((not np.isfinite(err)) or (err >= baseline)
+                 or float((W @ H).max()) > RECON_BOUND * xmax)
+    return W, H, err, collapsed
+
+
+def masked_nmf_stable(X, O, k, seed, max_iter=200, tol=1e-5, max_extra=10,
+                      l2=0.0):
+    """masked_nmf, re-seeding past a collapsed fit.
+
+    Mirrors fit_nmf_stable in nmf_fit.py, including its disjoint retry-seed
+    range so a retry can never collide with another slot's seed. Raises rather
+    than returning a collapsed fit: a rank sweep that silently accepted one
+    would report a confident AUC for a diverged solver, which is exactly the
+    failure this exists to prevent.
+    """
+    W, H, err, collapsed = masked_nmf(X, O, k, seed, max_iter, tol, l2)
+    if not collapsed:
+        return W, H, err, 0
+    for i in range(max_extra):
+        alt = _RETRY_BASE + seed * max_extra + i
+        W, H, err, collapsed = masked_nmf(X, O, k, alt, max_iter, tol, l2)
+        if not collapsed:
+            return W, H, err, i + 1
+    raise RuntimeError(
+        f"k={k} seed={seed}: masked NMF collapsed on all {max_extra} retries")
 
 
 def auc(scores, labels):
@@ -139,6 +212,12 @@ def main() -> int:
                     help="modules sampled for tractability (0 = all)")
     ap.add_argument("--max-iter", type=int, default=200)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--l2", type=float, default=0.0,
+                    help="ridge penalty on W and H. 0 (default) reproduces "
+                         "the unregularised fit that selected k=18 for the "
+                         "promoter build. Needed at high rank: the masked "
+                         "objective does not constrain W @ H off the observed "
+                         "set, so capacity escapes there.")
     ap.add_argument("--matrix", default=None,
                     help="occupancy .npz; default is the promoter build's "
                          "occupancy.modules.npz. Point this at a genome run's "
@@ -193,19 +272,23 @@ def main() -> int:
              f"({y.sum():,.0f} positives, {y.mean():.3%} dense)")
         for k in ranks:
             t0 = time.time()
-            W, H = masked_nmf(X, O, k, seed=args.seed + fold, max_iter=args.max_iter)
+            W, H, ferr, nret = masked_nmf_stable(
+                X, O, k, seed=args.seed + fold, max_iter=args.max_iter,
+                l2=args.l2)
             P = (W @ H)[held]
             a = auc(P, y)
             rmse = float(np.sqrt(np.mean((P - y) ** 2)))
             rows.append(dict(fold=fold, k=k, auc=a, rmse=rmse,
-                             secs=round(time.time() - t0, 1)))
+                             retries=nret, secs=round(time.time() - t0, 1)))
             _log(f"    k={k:>3}  heldout AUC={a:.4f}  RMSE={rmse:.4f}  "
-                 f"({time.time()-t0:.0f}s)")
+                 f"({time.time()-t0:.0f}s)"
+                 + (f"  [{nret} reseed(s)]" if nret else ""))
 
     d = pd.DataFrame(rows)
     g = (d.groupby("k")
            .agg(auc_mean=("auc", "mean"), auc_sd=("auc", "std"),
-                rmse_mean=("rmse", "mean"), secs=("secs", "sum"))
+                rmse_mean=("rmse", "mean"), retries=("retries", "sum"),
+                secs=("secs", "sum"))
            .reset_index())
     # Write beside the matrix, not into the promoter build, or a genome-wide
     # sweep silently overwrites the promoter one that chose k=18.
