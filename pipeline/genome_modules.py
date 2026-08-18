@@ -92,6 +92,8 @@ KDE_BW           = 25
 # NOT 2: that was calibrated for dense promoter windows, and genome-wide it
 # carries FDR 3.83 -- the null produces ~4x more 2-TF elements than real data.
 MIN_SUPPORT      = 11
+DETECT_SUPPORT   = 2        # permissive during detection; MIN_SUPPORT is
+                            # applied after assignment, matching the null
 BOUNDARY_FRAC    = 0.20
 MIN_PEAK_DIST_BP = 50
 RECENTER_HALF    = 12
@@ -239,7 +241,15 @@ def main() -> int:
         np.add.at(grid, pos, w_)
         dens = gaussian_filter1d(grid, KDE_BW, mode="constant")
         del grid
-        found = _detect_modules_density(dens, KDE_BW, args.min_support,
+        # Detect PERMISSIVELY, then apply the floor after assignment -- the
+        # same order as genome_support_null.py, so the element population here
+        # is the one its FDR curve was computed on. Passing the floor to
+        # detection instead would conflate two different things: this argument
+        # is a density HEIGHT threshold, (min_support - 0.5) * one_tf_peak, so
+        # a floor of 11 raises the detection bar 10.5x over a floor of 2 and
+        # silently suppresses real elements whose density peak is short but
+        # which carry many distinct TFs.
+        found = _detect_modules_density(dens, KDE_BW, DETECT_SUPPORT,
                                         BOUNDARY_FRAC, MIN_PEAK_DIST_BP)
         _log(f"  chr{cname}: {len(sel):,} peaks, {n/1e6:.1f} Mb grid, "
              f"{len(found):,} candidate elements ({time.time()-t1:.0f}s)")
@@ -249,9 +259,21 @@ def main() -> int:
                 continue
             tt, vv = t_[i0:i1], v_[i0:i1]
             supp = np.unique(tt)
-            if supp.size < args.min_support:
+            if supp.size < DETECT_SUPPORT:
                 continue
             assigned = np.unique(tt[vv >= MIN_SCORE_ASSIGN])
+            # Floor n_tfs_ASSIGNED, not n_tfs_supporting. genome_support_null.py
+            # builds its FDR curve on n_tfs_assigned, and `assigned` is a strict
+            # subset of `supp` (it additionally requires score >= MIN_SCORE_
+            # ASSIGN), so flooring `supp` is a WEAKER condition than the one
+            # calibrated. Measured on the first genome-wide run: it admitted
+            # 96,351 elements (19.3%) below the calibrated floor -- 2,306 of
+            # them with no assigned TF at all, i.e. empty rows in the NMF
+            # matrix, which is built from `assigned` below. The leak was
+            # stratum-biased too (21.6% distal vs 3.2% promoter), inflating
+            # exactly the stratum whose novelty is the point of this analysis.
+            if assigned.size < args.min_support:
+                continue
             rows.append((eid, cname, int(a), int(b), int(pk), int(b - a + 1),
                          float(h), int(i1 - i0), int(supp.size),
                          int(assigned.size)))
@@ -338,7 +360,10 @@ def main() -> int:
             "nature, so a 'distal-specific' program may only be the program "
             "that captures low-complexity elements -- re-check any such claim "
             "on elements matched for n_tfs_assigned."),
-        params={"min_support": args.min_support, "min_score_assign": MIN_SCORE_ASSIGN,
+        params={"min_support (on n_tfs_assigned, after assignment)":
+                    args.min_support,
+                "detect_support (during detection)": DETECT_SUPPORT,
+                "min_score_assign": MIN_SCORE_ASSIGN,
                 "kde_bw": KDE_BW, "boundary_frac": BOUNDARY_FRAC,
                 "min_peak_dist_bp": MIN_PEAK_DIST_BP,
                 "nbhd_bp (per-TF local weight)": NBHD_BP,
