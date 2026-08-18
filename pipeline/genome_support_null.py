@@ -67,18 +67,13 @@ from scipy.ndimage import gaussian_filter1d
 from config import (MIN_SCORE_ASSIGN, TIER, TF_SET,
                     analysis_dir, write_analysis_readme)
 
-import importlib.util as _ilu
+# Plain import, NOT importlib: multiprocessing pickles _read_tf by module name,
+# and a child cannot re-import a module registered under a synthetic name -- it
+# fails with "import of module '_gm' failed". genome_modules is a legal module
+# name so a normal import works; the importlib route is only necessary for
+# tss_modules.001.py, whose dots make it unimportable.
+import genome_modules as _gm
 
-
-def _load(name, fname):
-    spec = _ilu.spec_from_file_location(
-        name, str(Path(__file__).resolve().parent / fname))
-    mod = _ilu.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-_gm = _load("_gm", "genome_modules.py")          # peak loading + constants
 _detect = _gm._detect_modules_density
 
 KDE_BW, MIN_PEAK_DIST_BP = _gm.KDE_BW, _gm.MIN_PEAK_DIST_BP
