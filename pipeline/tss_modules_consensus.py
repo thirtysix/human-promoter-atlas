@@ -168,6 +168,55 @@ def main() -> int:
            for r, i in enumerate(np.argsort(H[p])[::-1][:args.top_tfs])]
     pd.DataFrame(top).to_csv(ROOT / f"nmf.k{K}.top_tfs.tsv", sep="\t", index=False)
 
+    # module_program / gene_configurations / summary, identical in form to
+    # tss_modules_k10.py. Everything downstream (enrichment, archetypes,
+    # build_app_db, compare_builds) reads these, so a stage that writes only
+    # W/H leaves the build unusable while looking finished.
+    row_sum = W.sum(axis=1, keepdims=True)
+    W_norm = W / np.where(row_sum > 0, row_sum, 1.0)
+    dom = W_norm.argmax(axis=1) + 1
+    mp = pd.DataFrame({
+        "module_id":        modules_in["module_id"].values,
+        "tss_id":           modules_in["tss_id"].values,
+        "gene_name":        modules_in["gene_name"].values,
+        "transcript_id":    modules_in["transcript_id"].values,
+        "center_offset":    modules_in["center_offset"].values,
+        "width":            modules_in["width"].values,
+        "dominant_program": dom,
+        "dominant_weight":  W_norm[np.arange(W.shape[0]), dom - 1],
+    })
+    for p in range(K):
+        mp[f"prog{p+1}_w"] = W_norm[:, p]
+    mp.to_csv(ROOT / f"nmf.k{K}.module_program.tsv", sep="\t", index=False)
+
+    (mp.sort_values(["transcript_id", "center_offset"])
+       .groupby(["transcript_id", "gene_name"])
+       .agg(n_modules=("module_id", "size"),
+            program_path=("dominant_program", lambda s: ",".join(map(str, s))),
+            centers=("center_offset", lambda s: ",".join(map(str, s))),
+            widths=("width", lambda s: ",".join(map(str, s))))
+       .reset_index()
+       .to_csv(ROOT / f"nmf.k{K}.gene_configurations.tsv", sep="\t", index=False))
+
+    srows = []
+    for p in range(1, K + 1):
+        sub = mp[mp["dominant_program"] == p]
+        tops = list(pd.Series(H[p - 1], index=tf_names)
+                      .sort_values(ascending=False).head(8).index)
+        srows.append({
+            "program": p, "n_modules": len(sub),
+            "median_center": int(sub["center_offset"].median()) if len(sub) else 0,
+            "median_width":  int(sub["width"].median()) if len(sub) else 0,
+            "mean_dom_weight": round(float(sub["dominant_weight"].mean()), 4) if len(sub) else 0.0,
+            "top_tfs": ",".join(tops), "reading": ", ".join(tops[:3]),
+            # stability travels WITH the summary so anything reading the program
+            # table gets the reproducibility alongside it, not from a side file.
+            "median_cosine": round(float(med[p - 1]), 4),
+            "reproducible": bool(med[p - 1] >= COS_MIN),
+        })
+    (pd.DataFrame(srows).sort_values("n_modules", ascending=False)
+       .to_csv(ROOT / f"nmf.k{K}.summary.tsv", sep="\t", index=False))
+
     stab = pd.DataFrame({
         "program": range(1, K + 1),
         "median_cosine": med, "min_cosine": mn,
