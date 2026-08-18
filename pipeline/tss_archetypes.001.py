@@ -93,8 +93,8 @@ def main():
     OUT_DN.mkdir(parents=True, exist_ok=True)
     PLOTS_DN.mkdir(parents=True, exist_ok=True)
 
-    # 1) Build [n_gene x K_PROGRAMS] count matrix from module_program (k=10)
-    _log("loading module_program (k=10)…")
+    # 1) Build [n_gene x K_PROGRAMS] count matrix from module_program
+    _log(f"loading module_program (k={K_PROGRAMS})…")
     mp = pd.read_csv(MOD_DN / f"nmf.k{K_PROGRAMS}.module_program.tsv",
                       sep="\t", usecols=["transcript_id", "gene_name",
                                           "dominant_program"])
