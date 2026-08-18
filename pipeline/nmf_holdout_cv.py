@@ -65,6 +65,7 @@ import time
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+from pathlib import Path
 
 from config import OUT_DN, TIER, TF_SET, MIN_SCORE_ASSIGN
 
@@ -138,6 +139,10 @@ def main() -> int:
                     help="modules sampled for tractability (0 = all)")
     ap.add_argument("--max-iter", type=int, default=200)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--matrix", default=None,
+                    help="occupancy .npz; default is the promoter build's "
+                         "occupancy.modules.npz. Point this at a genome run's "
+                         "occupancy.elements.npz to select a rank for it.")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     ranks = [int(r) for r in args.ranks.split(",") if r.strip()]
@@ -151,7 +156,9 @@ def main() -> int:
             f"  submitting shell and use --export=ALL instead.")
 
     root = OUT_DN / "tss_modules"
-    M = sp.load_npz(str(root / "occupancy.modules.npz")).tocsr()
+    mpath = Path(args.matrix) if args.matrix else root / "occupancy.modules.npz"
+    M = sp.load_npz(str(mpath)).tocsr()
+    _log(f"  matrix {mpath}")
     _log(f"build {OUT_DN.name} (tier={TIER} tf_set={TF_SET} "
          f"min_score_assign={MIN_SCORE_ASSIGN})")
     _log(f"  occupancy {M.shape}  nnz={M.nnz:,}  density={M.nnz/np.prod(M.shape):.3%}")
@@ -200,7 +207,11 @@ def main() -> int:
            .agg(auc_mean=("auc", "mean"), auc_sd=("auc", "std"),
                 rmse_mean=("rmse", "mean"), secs=("secs", "sum"))
            .reset_index())
-    out = args.out or (root / "k_selection" / "holdout_cv.tsv")
+    # Write beside the matrix, not into the promoter build, or a genome-wide
+    # sweep silently overwrites the promoter one that chose k=18.
+    out = args.out or (mpath.parent / "k_selection" / "holdout_cv.tsv"
+                       if args.matrix else
+                       root / "k_selection" / "holdout_cv.tsv")
     os.makedirs(os.path.dirname(str(out)), exist_ok=True)
     g.to_csv(out, sep="\t", index=False, float_format="%.6f")
 

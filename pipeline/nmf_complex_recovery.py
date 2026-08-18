@@ -88,6 +88,9 @@ def main() -> int:
     ap.add_argument("--ranks", default="5,8,10,12,15,18,20,25,30")
     ap.add_argument("--seeds", type=int, default=5)
     ap.add_argument("--cc", default=None, help="path to c5.go.cc json")
+    ap.add_argument("--matrix", default=None,
+                    help="occupancy .npz; default is the promoter build's. "
+                         "Point at a genome run's occupancy.elements.npz.")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     ranks = [int(r) for r in args.ranks.split(",") if r.strip()]
@@ -101,7 +104,9 @@ def main() -> int:
             f"  submitting shell and use --export=ALL instead.")
 
     root = OUT_DN / "tss_modules"
-    M = sp.load_npz(str(root / "occupancy.modules.npz")).tocsr()
+    mpath = Path(args.matrix) if args.matrix else root / "occupancy.modules.npz"
+    M = sp.load_npz(str(mpath)).tocsr()
+    _log(f"  matrix {mpath}")
     tf_names = (pd.read_csv(root / "tf_index.tsv", sep="\t")
                   .sort_values("tf_idx")["TF"].tolist())
     cc_path = Path(args.cc) if args.cc else Path(str(MSIGDB_FN)).parent / "c5.go.cc.v2026.1.Hs.json"
@@ -134,7 +139,11 @@ def main() -> int:
              f"collapses={retries_tot}  ({time.time()-t0:.0f}s)")
 
     d = pd.DataFrame(rows)
-    out = args.out or (root / "k_selection" / "complex_recovery.tsv")
+    # Beside the matrix, so a genome sweep does not overwrite the
+    # promoter build's k_selection results.
+    out = args.out or (mpath.parent / "k_selection" / "complex_recovery.tsv"
+                       if args.matrix else
+                       root / "k_selection" / "complex_recovery.tsv")
     os.makedirs(os.path.dirname(str(out)), exist_ok=True)
     d.to_csv(out, sep="\t", index=False, float_format="%.6f")
 
