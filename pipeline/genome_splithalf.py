@@ -72,15 +72,31 @@ def _log(m):
     print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] {m}", flush=True)
 
 
-def _half_of(srx: str) -> int:
-    """Deterministic, order-independent A/B assignment for one accession."""
-    return hashlib.md5(srx.encode()).digest()[0] & 1
+def _srx_key(srx: str) -> bytes:
+    """Deterministic sort key, so the split does not depend on file order."""
+    return hashlib.md5(srx.encode()).digest()
+
+
+def _split_within_tf(srxs) -> dict:
+    """Assign one TF's OWN experiments alternately to halves A and B.
+
+    Hashing each accession independently loses any TF whose experiments all
+    land on one side: certain for a single-experiment TF, 50% for two, still
+    12.5% for four. Measured on this build that discarded 497 of 1,793 TFs --
+    and precisely the sparsely-assayed ones, whose programs are the least
+    likely to replicate, so it biased replication UPWARD. Blocking the
+    randomisation within TF keeps every TF with >=2 experiments on both sides.
+    Order is by hash of the accession, not file order, so it stays reproducible.
+    """
+    ordered = sorted(srxs, key=_srx_key)
+    return {srx: i & 1 for i, srx in enumerate(ordered)}
 
 
 def _read_tf_half(args):
     """(tf_idx, packed_midpoints, scores, halves) for one TF."""
     tf_idx, paths, keep = args
-    mids, scs, hlf = [], [], []
+    mids, scs, sidx = [], [], []
+    seen = {}                     # SRX -> small int, interned per TF
     for p in paths:
         try:
             with gzip.open(p, "rt") as fh:
@@ -95,9 +111,19 @@ def _read_tf_half(args):
                     mid = (mid // (2 * gm.RECENTER_HALF + 1)) * (2 * gm.RECENTER_HALF + 1)
                     mids.append((keep[c] << 40) | mid)
                     scs.append(int(f[4]))
-                    hlf.append(_half_of(f[5].strip()))
+                    srx = f[5].strip()
+                    j = seen.get(srx)
+                    if j is None:
+                        j = seen[srx] = len(seen)
+                    sidx.append(j)
         except Exception:
             continue
+    # Stratify WITHIN this TF, using only what this worker already read.
+    assign = _split_within_tf(seen.keys())
+    lut = np.empty(len(seen), np.int8)
+    for srx, j in seen.items():
+        lut[j] = assign[srx]
+    hlf = lut[np.asarray(sidx, np.int64)] if sidx else []
     if not mids:
         return (tf_idx, np.empty(0, np.int64), np.empty(0, np.int16),
                 np.empty(0, np.int8))
