@@ -149,6 +149,21 @@ if not 0 <= MIN_SCORE_ASSIGN <= 1000:
 # k<=10 under-fits. At k=10 on that axis cohesin, the E-box factors and the
 # pausing machinery are forced to share components and swap between seeds.
 K_CANONICAL = int(optional("HPA_K_CANONICAL", "10"))
+
+# A program pinned to a handful of elements reconverges perfectly across seeds,
+# so seed stability ALONE marks it reproducible: 22 of the k=140 genome programs
+# have <100 elements, cover 0.1% of the data between them, and score median seed
+# cosine 0.999. "Substantive" combines size with stability. Defined once here --
+# a second copy of this rule in a loader would drift, and what the app calls
+# reproducible would quietly stop matching what the analysis called reproducible.
+SUBSTANTIVE_MIN_ELEMENTS = 100
+SUBSTANTIVE_MIN_COSINE   = 0.90
+
+
+def is_substantive(n_elements, median_cosine):
+    """Elementwise; works on scalars, arrays and pandas Series alike."""
+    return ((n_elements >= SUBSTANTIVE_MIN_ELEMENTS)
+            & (median_cosine >= SUBSTANTIVE_MIN_COSINE))
 if not 2 <= K_CANONICAL <= 100:
     raise SystemExit(f"config: HPA_K_CANONICAL={K_CANONICAL} out of range 2-100")
 
