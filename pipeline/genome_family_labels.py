@@ -69,6 +69,13 @@ MIN_SET_SIZE = 3             # a 1-2 member set cannot be meaningfully enriched
 MAX_SET_SIZE = 150
 MIN_OVERLAP = 3              # 2/5 produced "protein folding chaperone" for
                              # the TFAP2/SOX10 family
+# BP is 3,492 usable sets against CC's 131, so it always contains some
+# 3-member term with a perfect overlap, and a 3/3 hit has enormous odds.
+# Pooling the libraries let those outbid real complexes: the cohesin family
+# lost "mitotic cohesin complex" to "positive regulation of T helper 17 cell
+# lineage", and the myeloid family became "mammary gland involution". A
+# floor on BP set size keeps the terms broad enough to be names.
+MIN_SET_SIZE_BP = 10
 
 
 def _log(m):
@@ -99,6 +106,13 @@ def main() -> int:
     ap.add_argument("--genome-dir", required=True)
     ap.add_argument("--k", type=int, required=True)
     ap.add_argument("--cc", required=True, help="MSigDB GO-CC json")
+    ap.add_argument("--bp", default=None,
+                    help="MSigDB GO-BP json. CC names COMPLEXES, which the "
+                         "structural/lineage families have none of -- BP "
+                         "names them by the process they drive "
+                         "(erythrocyte differentiation, stem cell "
+                         "maintenance, oxidative stress response).")
+    ap.add_argument("--mf", default=None, help="MSigDB GO-MF json")
     ap.add_argument("--alpha", type=float, default=FDR_ALPHA)
     args = ap.parse_args()
     root = Path(args.genome_dir)
@@ -107,18 +121,29 @@ def main() -> int:
     pf = pd.read_csv(fdir / "program_family.tsv", sep="\t")
     tt = pd.read_csv(root / f"nmf.k{args.k}.top_tfs.tsv", sep="\t")
     tf_all = set(pd.read_csv(root / "tf_index.tsv", sep="\t").TF)
-    cc = json.load(open(args.cc))
-    sets = {k: set(v["geneSymbols"]) & tf_all for k, v in cc.items()}
-    # COMPLEX terms only. GO-CC also annotates TFs to compartments they pass
-    # through or were incidentally observed in, and at small overlaps those
-    # win on odds: the nuclear-receptor family was labelled "presynaptic
-    # cytosol" (3/5) and the erythroid family "golgi membrane" (3/13). A
-    # compartment is not a name for a set of co-binding TFs.
-    sets = {k: v for k, v in sets.items()
-            if "COMPLEX" in k.upper()
-            and MIN_SET_SIZE <= len(v) <= MAX_SET_SIZE}
-    _log(f"{len(tf_all):,} assayed TFs; {len(sets):,} usable GO-CC sets "
-         f"(of {len(cc):,})")
+    sets, prov = {}, {}
+    for lib, path in (("CC", args.cc), ("BP", args.bp), ("MF", args.mf)):
+        if not path:
+            continue
+        raw = json.load(open(path))
+        got = 0
+        for k, v in raw.items():
+            st = set(v["geneSymbols"]) & tf_all
+            # CC is restricted to COMPLEX terms: it also annotates TFs to
+            # compartments they merely pass through, and at small overlaps
+            # those win on odds -- the nuclear-receptor family came back
+            # "presynaptic cytosol" (3/5), the erythroid one "golgi
+            # membrane" (3/13). BP and MF have no such failure mode: a
+            # process or an activity IS a reasonable name for a TF set.
+            if lib == "CC" and "COMPLEX" not in k.upper():
+                continue
+            floor = MIN_SET_SIZE_BP if lib in ("BP", "MF") else MIN_SET_SIZE
+            if floor <= len(st) <= MAX_SET_SIZE:
+                sets[k] = st
+                prov[k] = lib
+                got += 1
+        _log(f"  {lib}: {got:,} usable sets of {len(raw):,}")
+    _log(f"{len(tf_all):,} assayed TFs; {len(sets):,} usable sets total")
 
     top_by_prog = {p: set(g.nlargest(TOP_TFS_PER_PROGRAM, "loading").tf)
                    for p, g in tt.groupby("program")}
@@ -140,7 +165,7 @@ def main() -> int:
             b, c = len(mem) - a, len(st) - a
             d = len(tf_all) - a - b - c
             odds, p = fisher_exact([[a, b], [c, d]], alternative="greater")
-            rows.append(dict(family=fam, term=name, overlap=a,
+            rows.append(dict(family=fam, term=name, lib=prov[name], overlap=a,
                              set_size=len(st), family_size=len(mem),
                              odds=float(odds), p=float(p)))
     e = pd.DataFrame(rows)
@@ -165,14 +190,23 @@ def main() -> int:
         # not the smallest p. p-value ranks by evidence strength, which
         # structurally favours large generic sets; a label needs the term
         # that most distinguishes this family from the background.
-        hits = (e[(e.family == fam) & (e.q <= args.alpha)
+        # TIERED, not pooled: a complex is a better name for a set of
+        # co-binding TFs than a process, so CC is exhausted before BP/MF is
+        # consulted. Pooling them let narrow BP terms displace correct
+        # complex labels.
+        avail = e[(e.family == fam) & (e.q <= args.alpha)
                   & (~e.term.isin(claimed))]
-                .sort_values(["odds", "q"], ascending=[False, True]))
+        hits = avail[avail.lib == "CC"].sort_values(
+            ["odds", "q"], ascending=[False, True])
+        if not len(hits):
+            hits = avail[avail.lib != "CC"].sort_values(
+                ["odds", "q"], ascending=[False, True])
         if len(hits):
             best = hits.iloc[0]
             claimed.add(best.term)
             lab.append(dict(family=fam, label=_pretty(best.term),
-                            term=best.term, q=float(best.q),
+                            term=best.term, lib=str(best.lib),
+                            q=float(best.q),
                             overlap=int(best.overlap),
                             set_size=int(best.set_size), named=True,
                             n_terms_sig=int(len(hits))))
@@ -181,7 +215,7 @@ def main() -> int:
             # than promoting a non-significant hit to a name.
             lab.append(dict(family=fam,
                             label=" / ".join(str(r.top_tfs).split(", ")[:3]),
-                            term="", q=np.nan, overlap=0, set_size=0,
+                            term="", lib="", q=np.nan, overlap=0, set_size=0,
                             named=False, n_terms_sig=0))
     L = pd.DataFrame(lab)
     L.to_csv(fdir / "family_labels.tsv", sep="\t", index=False,
@@ -193,7 +227,8 @@ def main() -> int:
     m = L.merge(fs[["family", "n_elements", "top_tfs"]], on="family")
     for _, r in m.sort_values("n_elements", ascending=False).iterrows():
         flag = "" if r.named else "   [unnamed]"
-        q = f"q={r.q:.1e} {r.overlap}/{r.set_size}" if r.named else ""
+        q = (f"[{r.lib}] q={r.q:.1e} {r.overlap}/{r.set_size}"
+             if r.named else "")
         print(f"  fam {int(r.family):>3} ({int(r.n_elements):>7,} el)  "
               f"{r.label[:44]:<44} {q}{flag}")
     print(f"\n  named by enrichment: {n_named}/{len(L)}")
