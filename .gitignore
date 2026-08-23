@@ -4,6 +4,8 @@ data/aggregate/
 data/gtex/
 data/depmap/
 data/network/
+# MSigDB reference libraries (9 MB, versioned upstream; staged on the cluster)
+data/msigdb/
 
 # Python
 __pycache__/
