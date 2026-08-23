@@ -128,9 +128,15 @@ def get_modules_for_transcript(transcript_id: str) -> pd.DataFrame:
                m.n_tfs_supporting, m.n_tfs_assigned,
                mp.dominant_program, mp.dominant_weight,
                p.reading AS program_reading, p.top_tfs AS program_top_tfs
+        -- LEFT joins on purpose. These were inner joins, which silently
+        -- returned ZERO modules on a build whose promoter-program tables are
+        -- empty -- the promoter profile would have rendered with peaks and no
+        -- module blocks, its main content missing and nothing raising to say
+        -- so. Modules exist independently of any factorization; the program
+        -- columns are annotation on them and come back NULL when absent.
         FROM modules m
-        JOIN module_program mp USING (module_id)
-        JOIN programs p ON mp.dominant_program = p.program
+        LEFT JOIN module_program mp USING (module_id)
+        LEFT JOIN programs p ON mp.dominant_program = p.program
         WHERE m.transcript_id = ?
         ORDER BY m.center_offset
         """,

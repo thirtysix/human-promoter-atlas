@@ -637,23 +637,38 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
 
 
 def _add_module_blocks(fig: go.Figure, df: pd.DataFrame, row: int) -> None:
-    """Add module rectangles (one bar per module) to a given subplot row."""
+    """Add module rectangles (one bar per module) to a given subplot row.
+
+    dominant_program may be NULL: modules exist independently of any
+    factorization, and on a build whose programs come from the genome layer
+    they carry no promoter-program assignment. int(NA) raises, so the module
+    would take the whole profile down -- the blocks are the main content of
+    that panel, so they render unassigned rather than not at all.
+    """
     for _, m in df.iterrows():
-        p = int(m["dominant_program"])
+        raw = m.get("dominant_program")
+        has_prog = pd.notna(raw)
+        p = int(raw) if has_prog else None
+        colour = (PROGRAM_COLORS[(p - 1) % len(PROGRAM_COLORS)] if has_prog
+                  else REFERENCE)
+        label = f"P{p}" if has_prog else "module"
+        wt = m.get("dominant_weight")
+        wt_txt = f"<br>weight: {wt:.3f}" if pd.notna(wt) else ""
+        reading = m.get("program_reading", "")
+        reading_txt = f" ({reading})" if has_prog and pd.notna(reading) else ""
         fig.add_trace(go.Bar(
             x=[m["hi_offset"] - m["lo_offset"]],
             y=[0],
             base=m["lo_offset"],
             orientation="h",
-            marker=dict(color=PROGRAM_COLORS[p - 1],
-                        line=dict(width=1, color="black")),
-            name=f"P{p}",
+            marker=dict(color=colour, line=dict(width=1, color="black")),
+            name=label,
             hovertemplate=(
                 f"module {int(m['module_id'])}<br>"
-                f"P{p} ({m.get('program_reading', '')})<br>"
+                f"{label}{reading_txt}<br>"
                 f"bp: {int(m['lo_offset'])}–{int(m['hi_offset'])} "
-                f"(width {int(m['width'])})<br>"
-                f"weight: {m['dominant_weight']:.3f}<extra></extra>"
+                f"(width {int(m['width'])})"
+                f"{wt_txt}<extra></extra>"
             ),
             showlegend=False,
         ), row=row, col=1)

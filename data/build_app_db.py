@@ -828,42 +828,50 @@ def _promoter_programs_available() -> bool:
 
 
 def _stub_promoter_program_tables(con):
-    """Empty tables with the right shape for the promoter-program layer.
+    """Empty tables with the REAL schemas, parsed from this file's own DDL.
 
-    app/lib/db.py has 18 references to these across the GO search, archetype
-    and module-program paths. Without them a query raises Catalog Error and
-    takes the whole page down -- measured: the GO-search tab died outright on
-    a build with no promoter programs, and the others survived only because
-    the paths that reach them were not exercised.
+    app/lib/db.py has 18 references to the promoter-program layer. Without
+    these a query raises Catalog Error and takes the page down.
 
-    Empty is honest here: this build genuinely has no promoter-program
-    enrichment, so "no results" is the correct answer, and a tab that shows
-    nothing beats a tab that shows a stack trace. It is a safety net, not a
-    substitute for repointing those views at the genome layer -- family_terms
-    already holds 2,966 GO enrichments that the GO search should be reading.
+    The schemas are extracted from the CREATE TABLE statements above rather
+    than restated here. Restating them was the first attempt and it failed in
+    production: the hand-written `programs` stub had program/n_modules/top_tfs
+    and the real table also has median_center, median_width, mean_dom_weight
+    and `reading` -- so the per-transcript view died on
+    'Table "p" does not have a column named "reading"'. A copy drifts; a
+    derivation cannot.
+
+    Two tables gain per-program weight columns at build time (prog1_w ...
+    progK_w on module_program, arch weights on gene_archetypes). Those are
+    appended for the canonical K, since a SELECT * consumer would otherwise
+    see a narrower row than it does in a full build.
     """
-    ddl = {
-        "programs": "program INTEGER, n_modules INTEGER, top_tfs VARCHAR",
-        "module_program": "module_id INTEGER, dominant_program INTEGER, "
-                          "dominant_weight REAL",
-        "program_tf_top": "program INTEGER, rank INTEGER, tf VARCHAR, "
-                          "loading REAL",
-        "program_go_top": "program INTEGER, term VARCHAR, go_id VARCHAR, "
-                          "q_value REAL, odds REAL, n_genes INTEGER",
-        "gene_configs": "transcript_id VARCHAR, gene_name VARCHAR, "
-                        "program_path VARCHAR, n_modules INTEGER",
-        "gene_archetypes": "transcript_id VARCHAR, gene_name VARCHAR, "
-                           "dominant_archetype INTEGER, weight REAL",
-        "archetypes": "archetype INTEGER, n_genes INTEGER, top_programs VARCHAR",
-        "archetype_program_loading": "archetype INTEGER, program INTEGER, "
-                                     "loading REAL",
-        "archetype_go_top": "archetype INTEGER, term VARCHAR, go_id VARCHAR, "
-                            "q_value REAL, odds REAL, n_genes INTEGER",
-    }
-    for name, cols in ddl.items():
-        _exec(con, f"CREATE TABLE IF NOT EXISTS {name} ({cols});")
-    _log(f"  stubbed {len(ddl)} empty promoter-program tables so the views "
-         f"that read them return no rows instead of raising")
+    import re as _re
+    src = Path(__file__).read_text()
+    ddl = {m.group(1): m.group(2) for m in
+           _re.finditer(r"CREATE TABLE (\w+) \(\s*(.*?)\s*\);", src, _re.S)}
+    wanted = ["programs", "module_program", "program_tf_top", "program_go_top",
+              "gene_configs", "gene_archetypes", "archetypes",
+              "archetype_program_loading", "archetype_go_top"]
+    made = 0
+    for name in wanted:
+        body = ddl.get(name)
+        if not body:
+            _log(f"  WARNING: no CREATE TABLE found for {name}; "
+                 f"queries against it will still raise")
+            continue
+        # drop interpolation placeholders and PRIMARY KEY (empty stub, no rows)
+        body = _re.sub(r"\{[^}]*\}", "", body)
+        cols = [c.strip().replace(" PRIMARY KEY", "")
+                for c in body.split(",") if c.strip()]
+        if name == "module_program":
+            cols += [f'"prog{i}_w" REAL' for i in range(1, K_CANONICAL + 1)]
+        if name == "gene_archetypes":
+            cols += [f'"arch{i}_w" REAL' for i in range(1, 9)]
+        _exec(con, f"CREATE TABLE IF NOT EXISTS {name} ({', '.join(cols)});")
+        made += 1
+    _log(f"  stubbed {made} empty promoter-program tables from their real "
+         f"schemas, so the views that read them return no rows")
 
 
 def main():
