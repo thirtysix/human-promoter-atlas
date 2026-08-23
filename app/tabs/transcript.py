@@ -228,7 +228,20 @@ def render() -> None:
                                         reading=("program_reading", "first"))
                                    .reset_index()
                                    .sort_values("n", ascending=False))
-        cols = st.columns(min(len(prog_counts), 5))
+        # prog_counts is EMPTY when modules carry no promoter-program
+        # assignment -- the build takes programs from the genome layer. The
+        # enclosing guard checks modules_df, which is not empty, so this is
+        # reached with zero rows and st.columns(0) raises
+        # StreamlitInvalidColumnSpecError. The genome programs for this gene
+        # are shown by the neighbourhood section below.
+        if prog_counts.empty:
+            st.caption(
+                "Promoter modules here carry no program assignment of their "
+                "own — this build takes programs from the genome-wide layer. "
+                "See the element view below for the programs at this gene."
+            )
+            prog_counts = prog_counts.iloc[0:0]
+        cols = st.columns(min(len(prog_counts), 5)) if len(prog_counts) else []
         for i, (_, row) in enumerate(prog_counts.iterrows()):
             p = int(row["dominant_program"])
             n = int(row["n"])
@@ -552,10 +565,7 @@ def render() -> None:
                     pick_mid = st.selectbox(
                         "Module",
                         options=merged["module_id"].tolist(),
-                        format_func=lambda mid: (
-                            f"M{int(mid)}  ({int(merged.loc[merged['module_id']==mid, 'center_offset'].iloc[0]):+d} bp · "
-                            f"P{int(merged.loc[merged['module_id']==mid, 'dominant_program'].iloc[0])} · "
-                            f"r={merged.loc[merged['module_id']==mid, 'r_module_target'].iloc[0]:.2f})"),
+                        format_func=lambda mid: _module_label(merged, mid),
                         help="Pick a module to inspect the per-TF "
                              "correlation breakdown. Labels show: "
                              "M<id> (center bp · dominant program · "
@@ -843,3 +853,22 @@ def _render_neighbourhood(tss_meta) -> None:
                 f"that are not substantive — fewer than 100 elements or seed "
                 f"stability below 0.90."
             )
+
+
+def _module_label(merged, mid) -> str:
+    """Label for the module picker, tolerant of a NULL program.
+
+    dominant_program is NULL on a build whose programs come from the genome
+    layer, and int(NA) raises -- which would break the selectbox rather than
+    just omitting a letter.
+    """
+    row = merged.loc[merged["module_id"] == mid]
+    if row.empty:
+        return f"M{int(mid)}"
+    r = row.iloc[0]
+    parts = [f"M{int(mid)}", f"{int(r['center_offset']):+d} bp"]
+    if pd.notna(r.get("dominant_program")):
+        parts.append(f"P{int(r['dominant_program'])}")
+    if pd.notna(r.get("r_module_target")):
+        parts.append(f"r={r['r_module_target']:.2f}")
+    return f"{parts[0]}  ({' · '.join(parts[1:])})"

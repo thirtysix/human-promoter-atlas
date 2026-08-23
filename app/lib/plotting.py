@@ -521,9 +521,15 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
         showlegend=False,
     ), row=1, col=1)
     for _, m in modules_df.iterrows():
+        # dominant_program is NULL when programs come from the genome layer
+        # rather than a promoter factorization. int(NA) raises and would take
+        # the whole profile down, so an unassigned module shades neutrally.
+        raw = m.get("dominant_program")
+        fillcolor = (PROGRAM_COLORS[(int(raw) - 1) % len(PROGRAM_COLORS)]
+                     if pd.notna(raw) else REFERENCE)
         fig.add_vrect(
             x0=m["lo_offset"], x1=m["hi_offset"],
-            fillcolor=PROGRAM_COLORS[int(m["dominant_program"]) - 1],
+            fillcolor=fillcolor,
             opacity=0.18, line_width=0, layer="below", row=1, col=1,
         )
 
@@ -747,12 +753,18 @@ def fig_gtex_expression_with_modules(stats: pd.DataFrame,
         # HTML-styled tick labels = colored by program
         mod_labels = []
         for (mid, center) in wide.index:
-            prog = int(mid_to_prog.get(int(mid), 0))
-            color = (PROGRAM_COLORS[(prog - 1) % 10]
+            # .get(key, 0) does NOT protect here: the key exists, its value is
+            # NA, so the default never applies and int(NA) raises. Programs are
+            # NULL whenever they come from the genome layer rather than a
+            # promoter factorization.
+            raw = mid_to_prog.get(int(mid))
+            prog = int(raw) if pd.notna(raw) else 0
+            color = (PROGRAM_COLORS[(prog - 1) % len(PROGRAM_COLORS)]
                      if prog else "#444")
+            tag = f" · P{prog}" if prog else ""
             mod_labels.append(
                 f"<span style='color:{color};font-weight:600'>"
-                f"M{int(mid)} ({int(center):+d} bp · P{prog})</span>"
+                f"M{int(mid)} ({int(center):+d} bp{tag})</span>"
             )
 
     n_mod = len(wide.index) if has_heatmap else 0
