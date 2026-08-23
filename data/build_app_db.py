@@ -831,8 +831,13 @@ def main():
             load_gene_configs(con)
             canonical_A = load_archetypes(con)
         else:
-            _log(f"no nmf.k{K_CANONICAL}.module_program.tsv in "
-                 f"{ANALYSIS_DN.name}: loading modules WITHOUT programs.")
+            # Say WHY, accurately. The earlier wording claimed the file was
+            # missing, which is usually false -- stale nmf.k*.module_program.tsv
+            # files sit in most build directories, and a log line that
+            # misreports the reason sends the next reader looking for the wrong
+            # thing.
+            _log(f"HPA_PROMOTER_PROGRAMS is off: loading modules WITHOUT "
+                 f"promoter programs (k={K_CANONICAL} tables not built).")
             _log("  programs come from the genome build "
                  "(data/build_app_db_genome.py) -- one vocabulary site-wide.")
             load_modules_only(con)
