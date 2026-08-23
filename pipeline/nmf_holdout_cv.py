@@ -78,6 +78,10 @@ _RETRY_BASE = 100_000
 # out at 6-9; diverged ones at 76-8,729, so the gap is wide and the exact
 # multiple is not load bearing.
 RECON_BOUND = 10.0
+# Shape the published l2 was chosen at (genome matrix, 50k-row
+# subsample x 1,793 TFs). Quoted in Methods alongside the value,
+# because the value alone does not reproduce the result.
+L2_CALIBRATED_SHAPE = (50_000, 1_793)
 
 
 def _log(msg):
@@ -212,6 +216,13 @@ def main() -> int:
                     help="modules sampled for tractability (0 = all)")
     ap.add_argument("--max-iter", type=int, default=200)
     ap.add_argument("--seed", type=int, default=0)
+    # Shape at which the penalty was calibrated. l2 is NOT normalised by matrix
+    # dimensions, so its effective strength depends on the shape it is applied
+    # to. Normalising it sklearn-style would need different factors for W and H
+    # (n_features vs n_samples, 1,793 vs 50,000 here), so no single normalised
+    # value reproduces the raw one -- it would change the regularisation and
+    # invalidate the rank it selected. Recording the shape and warning on
+    # mismatch makes the result reproducible without silently altering it.
     ap.add_argument("--l2", type=float, default=0.0,
                     help="ridge penalty on W and H. 0 (default) reproduces "
                          "the unregularised fit that selected k=18 for the "
@@ -255,6 +266,15 @@ def main() -> int:
     X = np.asarray(M.todense(), dtype=np.float32)
     n, m = X.shape
     total = n * m
+    if args.l2 > 0:
+        _log(f"  l2={args.l2} applied at shape {n:,} x {m:,}. This penalty is "
+             f"NOT scale-free:")
+        _log(f"    the same value is a different regularisation at a different "
+             f"subsample or TF set.")
+        if (n, m) != L2_CALIBRATED_SHAPE:
+            _log(f"    WARNING: calibrated at {L2_CALIBRATED_SHAPE[0]:,} x "
+                 f"{L2_CALIBRATED_SHAPE[1]:,}; a rank selected here is not "
+                 f"comparable to one selected there.")
 
     rows = []
     t_all = time.time()
