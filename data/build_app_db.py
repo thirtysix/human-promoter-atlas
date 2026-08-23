@@ -263,8 +263,24 @@ def load_peaks(con):
     _log(f"  peaks: {n:,} rows")
 
 
+def load_modules_only(con):
+    """Just the modules table.
+
+    Used when the promoter build has no factorization of its own: the modules
+    are still the gene-facing unit, the programs simply come from the
+    genome-wide build instead. Shares its table definition with
+    load_modules_and_programs rather than restating it, so the two cannot drift.
+    """
+    return _load_modules(con)
+
+
 def load_modules_and_programs(con):
-    """modules + module_program (canonical k=10) + programs."""
+    """modules + module_program (canonical k) + programs."""
+    _load_modules(con)
+    _load_programs(con)
+
+
+def _load_modules(con):
     mods = pd.read_csv(ANALYSIS_DN / "tss_modules" / "modules.tsv", sep="\t")
 
     keep = ["module_id", "tss_id", "transcript_id", "gene_name",
@@ -301,7 +317,9 @@ def load_modules_and_programs(con):
     _exec(con, "CREATE INDEX idx_modules_gene ON modules(gene_name);")
     _log(f"  modules: {len(mods):,} rows")
 
-    # module_program (canonical k=10)
+
+def _load_programs(con):
+    # module_program (canonical k)
     mp = pd.read_csv(
         ANALYSIS_DN / "tss_modules" / f"nmf.k{K_CANONICAL}.module_program.tsv",
         sep="\t",
@@ -755,6 +773,32 @@ def write_manifest(canonical_A: int = 0, counts: dict | None = None):
 ################################################################################
 # Execution ####################################################################
 ################################################################################
+# When the promoter build carries no factorization of its own, everything
+# downstream of it has no source: module_program, programs, program_tf_top,
+# program_go_top, gene_configs and the archetypes all derive from a promoter
+# NMF. That is the intended state for the hybrid architecture -- programs come
+# from the genome-wide build via build_app_db_genome.py, one vocabulary across
+# the site -- so the absence is detected and skipped rather than crashing.
+#
+# EXPLICIT, not detected. Detecting by file existence looked tidier but gives
+# the wrong answer: stale nmf.k*.module_program.tsv files from earlier runs sit
+# in the build directory, so detection would silently re-enable promoter
+# programs and ship two competing program vocabularies. Default off; set
+# HPA_PROMOTER_PROGRAMS=1 to build them, and that fails loudly if the inputs
+# are absent rather than quietly falling back.
+def _promoter_programs_available() -> bool:
+    if _env("HPA_PROMOTER_PROGRAMS", "0") not in ("1", "true", "True"):
+        return False
+    fn = (ANALYSIS_DN / "tss_modules" /
+          f"nmf.k{K_CANONICAL}.module_program.tsv")
+    if not fn.exists():
+        raise SystemExit(
+            f"HPA_PROMOTER_PROGRAMS=1 but {fn} does not exist. Either run the "
+            f"promoter factorization at k={K_CANONICAL} or leave the flag off "
+            f"and take programs from the genome build.")
+    return True
+
+
 def main():
     DATA_DN.mkdir(parents=True, exist_ok=True)
     if DUCKDB_FN.exists():
@@ -766,11 +810,19 @@ def main():
         load_tss(con)
         load_tf(con)
         load_peaks(con)
-        load_modules_and_programs(con)
-        load_program_tf_top(con)
-        load_program_go_top(con)
-        load_gene_configs(con)
-        canonical_A = load_archetypes(con)
+        canonical_A = 0
+        if _promoter_programs_available():
+            load_modules_and_programs(con)
+            load_program_tf_top(con)
+            load_program_go_top(con)
+            load_gene_configs(con)
+            canonical_A = load_archetypes(con)
+        else:
+            _log(f"no nmf.k{K_CANONICAL}.module_program.tsv in "
+                 f"{ANALYSIS_DN.name}: loading modules WITHOUT programs.")
+            _log("  programs come from the genome build "
+                 "(data/build_app_db_genome.py) -- one vocabulary site-wide.")
+            load_modules_only(con)
 
         # tf_clusters convenience view (long format for the Aggregate tab)
         _exec(con, """
@@ -789,9 +841,10 @@ def main():
         # the Methods tab quotes the data it is serving rather than a literal.
         _log("table sizes:")
         counts = {}
-        tables = ["tss", "tf", "peaks", "modules", "module_program",
-                  "programs", "program_tf_top", "program_go_top",
-                  "gene_configs"]
+        tables = ["tss", "tf", "peaks", "modules"]
+        if _promoter_programs_available():
+            tables += ["module_program", "programs", "program_tf_top",
+                       "program_go_top", "gene_configs"]
         if canonical_A:
             tables += ["gene_archetypes", "archetypes",
                         "archetype_program_loading", "archetype_go_top"]
