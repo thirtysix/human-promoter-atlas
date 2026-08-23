@@ -246,21 +246,36 @@ def load_tf(con):
 
 
 def load_peaks(con):
-    """The hot table — 12 M rows from peaks.parquet."""
+    """Peaks as a PARQUET SIDECAR, not a table in the database.
+
+    At the q1e-5 tier this is 73.9 M rows and 94% of every cell in the
+    database -- 2.3 GB against 384 MB for the published q1e-50 build. The
+    container is capped at 2 GiB and already runs at 79% of that, so carrying
+    peaks in-database would OOM it.
+
+    Written sorted by tss_id so DuckDB's row-group statistics let a
+    single-TSS lookup skip almost every group. The app reads it through
+    read_parquet at query time, exactly as the GTEx panels already do, so
+    nothing is dropped and the resident set stays small.
+    """
     fn = ANALYSIS_DN / "tss_modules" / "peaks.parquet"
-    _exec(con, f"""
-        CREATE TABLE peaks AS
-        SELECT
-            CAST(tss_id AS INTEGER) AS tss_id,
-            CAST(tf_idx AS INTEGER) AS tf_idx,
-            CAST(local AS SMALLINT) AS local_offset,
-            CAST(score AS SMALLINT) AS score
-        FROM read_parquet('{fn}');
+    out = DATA_DN / "peaks.parquet"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    con.execute(f"""
+        COPY (
+            SELECT
+                CAST(tss_id AS INTEGER) AS tss_id,
+                CAST(tf_idx AS INTEGER) AS tf_idx,
+                CAST(local AS SMALLINT) AS local_offset,
+                CAST(score AS SMALLINT) AS score
+            FROM read_parquet('{fn}')
+            ORDER BY tss_id, tf_idx
+        ) TO '{out}' (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000);
     """)
-    _exec(con, "CREATE INDEX idx_peaks_tss ON peaks(tss_id);")
-    _exec(con, "CREATE INDEX idx_peaks_tf  ON peaks(tf_idx);")
-    n = con.execute("SELECT COUNT(*) FROM peaks;").fetchone()[0]
-    _log(f"  peaks: {n:,} rows")
+    n = con.execute(f"SELECT COUNT(*) FROM read_parquet('{out}')").fetchone()[0]
+    mb = out.stat().st_size / 1e6
+    _log(f"  peaks: {n:,} rows -> {out.name} ({mb:,.0f} MB sidecar, "
+         f"not in the database)")
 
 
 def load_modules_only(con):
@@ -812,6 +827,45 @@ def _promoter_programs_available() -> bool:
     return True
 
 
+def _stub_promoter_program_tables(con):
+    """Empty tables with the right shape for the promoter-program layer.
+
+    app/lib/db.py has 18 references to these across the GO search, archetype
+    and module-program paths. Without them a query raises Catalog Error and
+    takes the whole page down -- measured: the GO-search tab died outright on
+    a build with no promoter programs, and the others survived only because
+    the paths that reach them were not exercised.
+
+    Empty is honest here: this build genuinely has no promoter-program
+    enrichment, so "no results" is the correct answer, and a tab that shows
+    nothing beats a tab that shows a stack trace. It is a safety net, not a
+    substitute for repointing those views at the genome layer -- family_terms
+    already holds 2,966 GO enrichments that the GO search should be reading.
+    """
+    ddl = {
+        "programs": "program INTEGER, n_modules INTEGER, top_tfs VARCHAR",
+        "module_program": "module_id INTEGER, dominant_program INTEGER, "
+                          "dominant_weight REAL",
+        "program_tf_top": "program INTEGER, rank INTEGER, tf VARCHAR, "
+                          "loading REAL",
+        "program_go_top": "program INTEGER, term VARCHAR, go_id VARCHAR, "
+                          "q_value REAL, odds REAL, n_genes INTEGER",
+        "gene_configs": "transcript_id VARCHAR, gene_name VARCHAR, "
+                        "program_path VARCHAR, n_modules INTEGER",
+        "gene_archetypes": "transcript_id VARCHAR, gene_name VARCHAR, "
+                           "dominant_archetype INTEGER, weight REAL",
+        "archetypes": "archetype INTEGER, n_genes INTEGER, top_programs VARCHAR",
+        "archetype_program_loading": "archetype INTEGER, program INTEGER, "
+                                     "loading REAL",
+        "archetype_go_top": "archetype INTEGER, term VARCHAR, go_id VARCHAR, "
+                            "q_value REAL, odds REAL, n_genes INTEGER",
+    }
+    for name, cols in ddl.items():
+        _exec(con, f"CREATE TABLE IF NOT EXISTS {name} ({cols});")
+    _log(f"  stubbed {len(ddl)} empty promoter-program tables so the views "
+         f"that read them return no rows instead of raising")
+
+
 def main():
     DATA_DN.mkdir(parents=True, exist_ok=True)
     if DUCKDB_FN.exists():
@@ -841,6 +895,7 @@ def main():
             _log("  programs come from the genome build "
                  "(data/build_app_db_genome.py) -- one vocabulary site-wide.")
             load_modules_only(con)
+            _stub_promoter_program_tables(con)
 
         # tf_clusters convenience view (long format for the Aggregate tab)
         _exec(con, """
@@ -859,7 +914,7 @@ def main():
         # the Methods tab quotes the data it is serving rather than a literal.
         _log("table sizes:")
         counts = {}
-        tables = ["tss", "tf", "peaks", "modules"]
+        tables = ["tss", "tf", "modules"]   # peaks is a sidecar now
         if _promoter_programs_available():
             tables += ["module_program", "programs", "program_tf_top",
                        "program_go_top", "gene_configs"]

@@ -140,6 +140,27 @@ def get_modules_for_transcript(transcript_id: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_peaks_for_tss(tss_id: int, min_score: int = 0) -> pd.DataFrame:
+    """Peaks at one TSS, read from the parquet sidecar.
+
+    Peaks are not a table in the database: at the q1e-5 tier they are 73.9 M
+    rows and 94% of it, which would not fit the container's 2 GiB cap. The
+    file is written sorted by tss_id, so the tss_id predicate pushes down to
+    row-group statistics and a lookup touches a handful of groups rather than
+    scanning. Falls back to an in-database table if one exists, so a database
+    built the old way still works.
+    """
+    fn = DATA_DIR / "peaks.parquet"
+    if fn.exists():
+        return get_con().execute(
+            """
+            SELECT t.tf, p.tf_idx, p.local_offset, p.score
+            FROM read_parquet(?) p
+            JOIN tf t USING (tf_idx)
+            WHERE p.tss_id = ? AND p.score >= ?
+            ORDER BY t.tf, p.local_offset
+            """,
+            [str(fn), tss_id, min_score],
+        ).df()
     return get_con().execute(
         """
         SELECT t.tf, p.tf_idx, p.local_offset, p.score
