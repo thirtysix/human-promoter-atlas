@@ -1335,3 +1335,48 @@ def get_family_terms(family: int, limit: int = 25,
     sql += " ORDER BY rank LIMIT ?"
     params.append(limit)
     return get_con().execute(sql, params).df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_genome_program_tfs(program: int, limit: int = 30) -> pd.DataFrame:
+    return get_con().execute(
+        "SELECT rank, tf, loading FROM genome_program_tf_top "
+        "WHERE program = ? ORDER BY rank LIMIT ?", [program, limit]).df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_program_element_stats(program: int) -> pd.DataFrame:
+    """Stratum breakdown and distance spread for one program's elements.
+
+    Distances are |dist_to_tss| quantiles rather than a mean: the distribution
+    runs from a few hundred bp to several hundred kb and is heavily skewed, so
+    a mean would describe no actual element.
+    """
+    return get_con().execute(
+        """SELECT e.stratum,
+                  COUNT(*)                          AS n,
+                  MEDIAN(ABS(e.dist_to_tss))        AS median_dist,
+                  QUANTILE_CONT(ABS(e.dist_to_tss), 0.9) AS p90_dist,
+                  MEDIAN(e.n_tfs_assigned)          AS median_tfs,
+                  MEDIAN(e.width)                   AS median_width
+           FROM elements e JOIN element_program p USING (element_id)
+           WHERE p.dominant_program = ?
+           GROUP BY 1 ORDER BY n DESC""", [program]).df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_program_distance_hist(program: int, bins: int = 40) -> pd.DataFrame:
+    """Signed log-scaled distance histogram, for the position panel.
+
+    Signed, because upstream and downstream are not interchangeable, and
+    log-scaled because a linear axis over +/-500 kb puts every promoter
+    element in one bar.
+    """
+    return get_con().execute(
+        """SELECT CAST(SIGN(e.dist_to_tss) *
+                       LEAST(6, LOG10(GREATEST(ABS(e.dist_to_tss), 1)))
+                       * ? / 12 AS INTEGER) AS bin,
+                  COUNT(*) AS n
+           FROM elements e JOIN element_program p USING (element_id)
+           WHERE p.dominant_program = ?
+           GROUP BY 1 ORDER BY 1""", [bins, program]).df()

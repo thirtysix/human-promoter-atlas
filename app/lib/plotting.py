@@ -1171,3 +1171,33 @@ def fig_gene_neighbourhood(el: pd.DataFrame, lo: float, hi: float,
         legend=dict(font=dict(size=10)))
     fig.update_xaxes(range=[lo, hi])
     return fig
+
+
+def fig_program_distance(hist: pd.DataFrame, program: int,
+                         bins: int = 40) -> go.Figure:
+    """Signed, log-scaled distance distribution for one program's elements.
+
+    Log-scaled because these span three orders of magnitude -- PRC2's distal
+    elements have a p90 of 1.67 Mb while its promoter elements sit at 445 bp,
+    and a linear axis would put every promoter element in a single bar. Signed
+    because upstream and downstream are not interchangeable.
+    """
+    fig = go.Figure()
+    if not hist.empty:
+        # bin index -> signed log10 bp, inverted from the SQL binning
+        centre = hist["bin"].to_numpy() * 12.0 / bins
+        bp = np.sign(centre) * (10 ** np.abs(centre))
+        fig.add_trace(go.Bar(
+            x=centre, y=hist["n"], marker_color=PRIMARY,
+            customdata=bp,
+            hovertemplate="%{customdata:+,.0f} bp<br>%{y:,} elements<extra></extra>"))
+    ticks = [-6, -5, -4, -3, 0, 3, 4, 5, 6]
+    fig.update_layout(
+        title=f"Program {program}: element position relative to TSS",
+        xaxis_title="distance from TSS (log scale, signed)",
+        yaxis_title="elements", height=300, bargap=0.02,
+        margin=dict(l=60, r=20, t=50, b=50), showlegend=False)
+    fig.update_xaxes(tickmode="array", tickvals=ticks,
+                     ticktext=["−1Mb", "−100kb", "−10kb", "−1kb", "TSS",
+                               "1kb", "10kb", "100kb", "1Mb"])
+    return fig
