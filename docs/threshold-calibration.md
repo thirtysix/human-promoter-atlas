@@ -185,3 +185,39 @@ excluded, confirming those numbers were contaminated too.
 pin seed 0, which happens not to collapse. Switching them would change the
 published factorisation (programs renumbered, membership shifted), so it belongs
 with a deliberate rebuild rather than a bug fix.
+
+## Per-chromosome FDR at the genome-wide floor (2026-08-23)
+
+The support floor of 11 was calibrated on a genome-**aggregated** circular-shift
+null. It is not uniformly valid across chromosomes, and the spread is large
+enough to state in Methods rather than leave implicit.
+
+| floor | genome | chr19 | chrX |
+|---|---|---|---|
+| 10 | 0.049 | 0.310 | 0.00021 |
+| **11 (chosen)** | **0.023** | **0.165** | **0.00002** |
+| 13 | 0.005 | 0.043 | 0.000 |
+
+Floor for 5% FDR: **genome 10, chr19 13, chrX 6.**
+
+At the chosen floor chr19 runs at **16.5% FDR**, three times the target, while
+chrX is effectively zero — a spread of roughly four orders of magnitude. chr19
+holds **3.1%** of elements but contributes **22.3%** of the expected false
+ones. The driver is its null/observed ratio (4.37 against a genome mean of
+3.56): it is the most gene-dense chromosome, so shuffled peaks land in plausible
+neighbourhoods more often.
+
+**Per-chromosome floors are still rejected**, for the reason that rejected
+per-TF thresholds earlier in this document: the element × TF matrix feeds NMF
+and the TF × TF network, both of which treat rows as comparable. Rows built at
+different evidence bars are not. The cost of that choice is now quantified
+rather than assumed, which is the point of measuring it.
+
+**Consequence for readers:** distal elements on chr19 are the least reliable in
+the atlas. A result resting on chr19 elements near the support floor should be
+checked at a higher floor before it is believed.
+
+An earlier note here estimated chr19 at roughly 0.06 by scaling the null/observed
+ratio, then retracted it as unmeasured on the grounds that chr19's higher
+observed support pushes the other way. The measurement settles it: the ratio
+effect dominates, and the scaled estimate was low by a factor of ~3.
