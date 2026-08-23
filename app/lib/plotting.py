@@ -1045,3 +1045,129 @@ def fig_tf_program_loadings(loadings_df: pd.DataFrame, tf: str) -> go.Figure:
         height=220, margin=dict(l=60, r=20, t=50, b=40),
     )
     return fig
+
+
+# ---------------------------------------------------------------------------
+# Genome-wide element views (distal-capable)
+# ---------------------------------------------------------------------------
+# The promoter profile above is fixed to +/-OUTER_HALF and cannot show a distal
+# element: SOX2's run from 11 kb to 535 kb, a 350x span. Rendering both on one
+# axis would compress the promoter region -- the view this site exists for --
+# to a few pixels, so distal elements get their own zoom hierarchy.
+#
+# Zoom levels are QUANTILES of each gene's own element distances, not fixed
+# widths. A fixed neighbourhood width would be an arbitrary constant that is
+# wrong for most genes (median |dist| is 277 bp at the promoter, 4.8 kb
+# proximal, 72 kb distal), and it would clip sprawling genes while wasting
+# canvas on compact ones. Quantiles also make the level labels informative:
+# "50% of this gene's elements" says something about the gene; "200 kb" does
+# not.
+
+# 28 families need more than the 10-colour PROGRAM_COLORS palette above, which
+# would silently recycle hues and imply two families are the same one.
+FAMILY_COLORS = (pc.qualitative.Dark24 + pc.qualitative.Light24)
+
+
+def gene_zoom_levels(dist, promoter_half: int = OUTER_HALF,
+                     quantiles=(0.25, 0.50, 0.75, 1.00),
+                     min_for_levels: int = 8) -> list[dict]:
+    """Per-side quantile zoom windows for one gene's elements.
+
+    `dist` is signed distance to the gene's TSS. Windows are computed PER SIDE
+    because element distributions are usually lopsided -- a gene may carry 60
+    elements upstream and 5 downstream, and a symmetric window would spend half
+    the canvas on nothing.
+
+    Degenerate genes are collapsed rather than padded out: the median gene has
+    only 5 promoter+proximal elements and 1,419 have exactly one, where five
+    quantile levels would render as five near-identical pictures. Below
+    `min_for_levels` the caller gets promoter + one full-span view.
+    """
+    d = np.asarray(dist, dtype=float)
+    d = d[np.isfinite(d)]
+    levels = [{"label": "promoter", "lo": -promoter_half, "hi": promoter_half,
+               "frac": None}]
+    if d.size == 0:
+        return levels
+    up, dn = -d[d < 0], d[d >= 0]          # magnitudes each side
+    if d.size < min_for_levels:
+        lo = -(up.max() if up.size else promoter_half)
+        hi = dn.max() if dn.size else promoter_half
+        levels.append({"label": "all", "lo": float(lo), "hi": float(hi),
+                       "frac": 1.0})
+        return levels
+    for q in quantiles:
+        lo = -float(np.quantile(up, q)) if up.size else -promoter_half
+        hi = float(np.quantile(dn, q)) if dn.size else promoter_half
+        # never zoom in past the promoter box, or the levels invert
+        lo, hi = min(lo, -promoter_half), max(hi, promoter_half)
+        label = "all" if q >= 1.0 else f"{int(q*100)}%"
+        if levels and abs(lo - levels[-1]["lo"]) < 1 and abs(hi - levels[-1]["hi"]) < 1:
+            continue                        # identical to the previous level
+        levels.append({"label": label, "lo": lo, "hi": hi, "frac": float(q)})
+    return levels
+
+
+def fig_gene_neighbourhood(el: pd.DataFrame, lo: float, hi: float,
+                           gene: str = "", promoter_half: int = OUTER_HALF,
+                           family_labels: dict | None = None) -> go.Figure:
+    """Elements on a genomic axis, coloured by family, promoter region boxed.
+
+    Expects columns: dist_to_tss, n_tfs_assigned, stratum, family,
+    n_tss_comparably_close, substantive.
+
+    Two columns are rendered rather than dropped, because omitting them would
+    overstate what the view shows. `n_tss_comparably_close` >= 2 marks an
+    element whose nearest gene is ambiguous -- 56.6% of distal elements have a
+    rival TSS within twice the distance, so listing them under a gene without
+    the caveat asserts a regulatory link the data does not support. Elements
+    whose program is not `substantive` are drawn hollow, so a program pinned to
+    three elements does not carry the same visual authority as PRC2.
+    """
+    v = el[(el.dist_to_tss >= lo) & (el.dist_to_tss <= hi)].copy()
+    fig = go.Figure()
+    # promoter region, for orientation at every zoom level
+    fig.add_vrect(x0=-promoter_half, x1=promoter_half, fillcolor=PRIMARY,
+                  opacity=0.10, line_width=0, layer="below",
+                  annotation_text="promoter", annotation_position="top left")
+    fig.add_vline(x=0, line_width=1, line_dash="dot", line_color=REFERENCE)
+
+    if len(v):
+        fams = sorted(v.family.dropna().unique())
+        for f in fams:
+            g = v[v.family == f]
+            name = (family_labels or {}).get(int(f), f"family {int(f)}")
+            solid = g[g.substantive.astype(bool)]
+            hollow = g[~g.substantive.astype(bool)]
+            colour = FAMILY_COLORS[int(f) % len(FAMILY_COLORS)]
+            for part, marker in ((solid, dict(size=9, color=colour,
+                                              line=dict(width=0))),
+                                 (hollow, dict(size=9, color="rgba(0,0,0,0)",
+                                               line=dict(width=1.6,
+                                                         color=colour)))):
+                if not len(part):
+                    continue
+                amb = part.n_tss_comparably_close.to_numpy() >= 2
+                fig.add_trace(go.Scatter(
+                    x=part.dist_to_tss, y=part.n_tfs_assigned,
+                    mode="markers", name=name,
+                    legendgroup=name,
+                    showlegend=part is solid or not len(solid),
+                    marker=marker,
+                    customdata=np.stack([part.stratum,
+                                         part.n_tss_comparably_close,
+                                         np.where(amb, "ambiguous", "unique")],
+                                        axis=-1),
+                    hovertemplate=(
+                        f"<b>{name}</b><br>%{{x:+,.0f}} bp from TSS<br>"
+                        "%{y} TFs assigned<br>%{customdata[0]}<br>"
+                        "gene link: %{customdata[2]} "
+                        "(%{customdata[1]} TSS within 2x)<extra></extra>")))
+    fig.update_layout(
+        title=(f"{gene}: elements in view" if gene else "elements in view"),
+        xaxis_title="distance from TSS (bp)",
+        yaxis_title="TFs assigned",
+        height=380, margin=dict(l=60, r=20, t=50, b=50),
+        legend=dict(font=dict(size=10)))
+    fig.update_xaxes(range=[lo, hi])
+    return fig
