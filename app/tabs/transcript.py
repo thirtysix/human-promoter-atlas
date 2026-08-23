@@ -211,6 +211,14 @@ def render() -> None:
                                             tf_filter=tf_filter or None)
         st.plotly_chart(fig, width="stretch", theme=None)
 
+    # ----- Beyond the promoter window --------------------------------------
+    # The view above is fixed to +/-1.5 kb and cannot show a distal element:
+    # SOX2's run from 11 kb to 535 kb. A single axis wide enough for both would
+    # compress the promoter region to a few pixels, so the wider neighbourhood
+    # gets its own zoom hierarchy, with the promoter box marked at every level
+    # so the relationship stays legible.
+    _render_neighbourhood(tss_meta)
+
     # ----- Programs present (clickable cards) -------------------------------
     if not modules_df.empty:
         st.markdown("### Programs operating at this promoter",
@@ -782,3 +790,56 @@ def _render_program_card(program: int, reading: str, n_modules: int) -> None:
                            "this program preselected."):
             st.session_state["preselected_program"] = program
             nav.goto("programs")
+
+
+def _render_neighbourhood(tss_meta) -> None:
+    """Genome-wide elements around this gene, at quantile zoom levels."""
+    if not db.has_genome_layer():
+        return
+    gene = (tss_meta or {}).get("gene_name")
+    if not gene:
+        return
+    el = db.get_elements_for_gene(gene)
+    if el.empty:
+        return
+
+    n_far = int((el.stratum != "promoter").sum())
+    with st.container(border=True):
+        st.markdown(
+            f"### Beyond the promoter window — {n_far:,} further elements",
+            help="The profile above covers +/-1.5 kb around the canonical TSS. "
+                 "These are elements found genome-wide without reference to "
+                 "genes, then labelled by distance. Zoom levels are quantiles "
+                 "of THIS gene's element distances rather than fixed widths, "
+                 "so they adapt to genes that sprawl and genes that do not; "
+                 "the promoter region stays boxed at every level.",
+        )
+        levels = plotting.gene_zoom_levels(el.dist_to_tss)
+        if len(levels) < 2:
+            st.caption("Only promoter-proximal elements here.")
+            return
+        names = [L["label"] for L in levels]
+        pick = st.radio("zoom", names, index=len(names) - 1, horizontal=True,
+                        key=f"nbhd_zoom_{gene}",
+                        help="Percentages are the share of this gene's "
+                             "elements brought into view, not a fixed span.")
+        L = levels[names.index(pick)]
+        st.plotly_chart(
+            plotting.fig_gene_neighbourhood(
+                el, L["lo"], L["hi"], gene=gene,
+                family_labels=db.get_family_labels()),
+            width="stretch", theme=None)
+
+        amb = int((el.n_tss_comparably_close >= 2).sum())
+        distal = el[el.stratum == "distal"]
+        if len(distal):
+            amb_d = float((distal.n_tss_comparably_close >= 2).mean() * 100)
+            st.caption(
+                f"Elements are attributed to their NEAREST canonical TSS, "
+                f"which is a locator and not a regulatory assignment. "
+                f"{amb_d:.0f}% of this gene's {len(distal):,} distal elements "
+                f"have another TSS within twice the distance ({amb:,} of "
+                f"{len(el):,} elements overall). Hollow markers are programs "
+                f"that are not substantive — fewer than 100 elements or seed "
+                f"stability below 0.90."
+            )
