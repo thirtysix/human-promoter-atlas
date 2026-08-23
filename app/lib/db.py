@@ -1305,3 +1305,33 @@ def get_genes_in_family(family: int, limit: int = 200) -> pd.DataFrame:
            ORDER BY n_promoter DESC, promoter_weight DESC
            LIMIT ?""",
         [family, limit]).df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_family_terms(family: int, limit: int = 25,
+                     lib: str | None = None) -> pd.DataFrame:
+    """All significant enrichments for a family, best evidence first.
+
+    get_program_families() carries one headline label; this is everything that
+    cleared FDR. Worth showing, because the headline hides structure: family 8
+    is labelled "ESC/E(Z) complex" but its strongest hit is "PcG protein
+    complex" driven by CBX7, EZH2, JARID2, KDM2B, MTF2, PCGF1 and SUZ12 -- PRC1
+    and PRC2 members together, which the single label conceals.
+
+    `is_label` marks the row the headline came from. It is usually NOT row 1:
+    the list ranks by q, the label is chosen by tier-then-odds (median rank 4).
+    A UI that shows the headline above this list should highlight that row, or
+    the two will look inconsistent.
+
+    `overlap_tfs` is the evidence -- which member TFs are in the term -- so a
+    reader can judge a 3/7 hit rather than trust it.
+    """
+    sql = ("SELECT rank, is_label, label, lib, go_id, url, overlap, set_size, "
+           "odds, q, overlap_tfs FROM family_terms WHERE family = ?")
+    params: list = [family]
+    if lib:
+        sql += " AND lib = ?"
+        params.append(lib)
+    sql += " ORDER BY rank LIMIT ?"
+    params.append(limit)
+    return get_con().execute(sql, params).df()

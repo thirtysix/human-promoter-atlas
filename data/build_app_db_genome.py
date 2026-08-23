@@ -227,13 +227,35 @@ def load_program_families(con, root: Path, k: int):
         return
     pf = pd.read_csv(fdir / "program_family.tsv", sep="\t")
     fs = pd.read_csv(fdir / "family_summary.tsv", sep="\t")
+    lab_p, term_p = fdir / "family_labels.tsv", fdir / "family_terms.tsv"
+    if lab_p.exists():
+        fs = fs.merge(pd.read_csv(lab_p, sep="\t")[
+            ["family", "label", "term", "lib", "q", "overlap", "set_size",
+             "named"]], on="family", how="left")
 
     _exec(con, "DROP TABLE IF EXISTS program_families;")
     con.register("fs_df", fs)
     _exec(con, "CREATE TABLE program_families AS SELECT * FROM fs_df;")
     con.unregister("fs_df")
     _exec(con, "CREATE INDEX idx_pf_family ON program_families(family);")
-    _log(f"  program_families: {len(fs):,} rows")
+    _log(f"  program_families: {len(fs):,} rows"
+         + (f", {int(fs.named.sum())} named by enrichment"
+            if "named" in fs.columns else ""))
+
+    # Every significant term per family, not just the headline. A family is
+    # usually enriched for several related terms, and overlap_tfs names which
+    # members drove each call -- that is the evidence, and it lets a reader
+    # judge a 3/7 hit instead of taking the label on trust.
+    if term_p.exists():
+        ft = pd.read_csv(term_p, sep="\t")
+        _exec(con, "DROP TABLE IF EXISTS family_terms;")
+        con.register("ft_df", ft)
+        _exec(con, "CREATE TABLE family_terms AS SELECT * FROM ft_df;")
+        con.unregister("ft_df")
+        _exec(con, "CREATE INDEX idx_ft_family ON family_terms(family);")
+        _exec(con, "CREATE INDEX idx_ft_lib ON family_terms(lib);")
+        _log(f"  family_terms: {len(ft):,} rows "
+             f"(median {int(ft.groupby('family').size().median())} per family)")
 
     # attach the family to each program so a program page can name its family
     # without a second query

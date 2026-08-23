@@ -121,7 +121,7 @@ def main() -> int:
     pf = pd.read_csv(fdir / "program_family.tsv", sep="\t")
     tt = pd.read_csv(root / f"nmf.k{args.k}.top_tfs.tsv", sep="\t")
     tf_all = set(pd.read_csv(root / "tf_index.tsv", sep="\t").TF)
-    sets, prov = {}, {}
+    sets, prov, meta = {}, {}, {}
     for lib, path in (("CC", args.cc), ("BP", args.bp), ("MF", args.mf)):
         if not path:
             continue
@@ -141,6 +141,7 @@ def main() -> int:
             if floor <= len(st) <= MAX_SET_SIZE:
                 sets[k] = st
                 prov[k] = lib
+                meta[k] = (v.get("exactSource", ""), v.get("msigdbURL", ""))
                 got += 1
         _log(f"  {lib}: {got:,} usable sets of {len(raw):,}")
     _log(f"{len(tf_all):,} assayed TFs; {len(sets):,} usable sets total")
@@ -167,7 +168,12 @@ def main() -> int:
             odds, p = fisher_exact([[a, b], [c, d]], alternative="greater")
             rows.append(dict(family=fam, term=name, lib=prov[name], overlap=a,
                              set_size=len(st), family_size=len(mem),
-                             odds=float(odds), p=float(p)))
+                             odds=float(odds), p=float(p),
+                             go_id=meta[name][0], url=meta[name][1],
+                             # WHICH member TFs drove the call. More useful
+                             # than a prose blurb: it is the evidence, and it
+                             # lets a reader judge a 3/7 hit for themselves.
+                             overlap_tfs=", ".join(sorted(mem & st))))
     e = pd.DataFrame(rows)
     if e.empty:
         raise SystemExit("no testable family/term overlaps")
@@ -220,6 +226,28 @@ def main() -> int:
     L = pd.DataFrame(lab)
     L.to_csv(fdir / "family_labels.tsv", sep="\t", index=False,
              float_format="%.3g")
+
+    # Every significant term per family, not just the winner. One label is a
+    # summary; a family is usually enriched for several related terms and the
+    # UI should be able to show them.
+    terms = (e[e.q <= args.alpha]
+             .sort_values(["family", "q", "odds"], ascending=[True, True, False])
+             .copy())
+    terms["label"] = terms.term.map(_pretty)
+    terms["rank"] = terms.groupby("family").cumcount() + 1
+    # The list is ranked by q (evidence) but the PRIMARY label is chosen by
+    # tier-then-odds, so row 1 is often not the label. Mark it, or the UI shows
+    # a headline that does not match the top row beneath it.
+    chosen = set(zip(L.family, L.term))
+    terms["is_label"] = [(f, t) in chosen
+                         for f, t in zip(terms.family, terms.term)]
+    terms[["family", "rank", "is_label", "label", "term", "lib", "go_id", "url",
+           "overlap", "set_size", "odds", "q", "overlap_tfs"]].to_csv(
+        fdir / "family_terms.tsv", sep="\t", index=False, float_format="%.4g")
+    per_family = terms.groupby("family").size()
+    _log(f"family_terms.tsv: {len(terms):,} significant terms across "
+         f"{terms.family.nunique()} families "
+         f"(median {int(per_family.median())} each, max {int(per_family.max())})")
 
     n_named = int(L.named.sum())
     print()
