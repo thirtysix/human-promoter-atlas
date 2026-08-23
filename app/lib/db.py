@@ -1198,3 +1198,110 @@ def load_aggregate_matrix(flavor: str = "binary") -> pd.DataFrame:
     df = df.set_index("TF")
     df.columns = df.columns.astype(int)
     return df
+
+
+# ---------------------------------------------------------------------------
+# Genome-wide element layer
+# ---------------------------------------------------------------------------
+# These read the annotation-free build (elements, genome_programs,
+# program_families) that sits behind the gene-centric front door. The promoter
+# tables above are unchanged: the regression gate showed both layers see the
+# same promoters (98.2% recovery at 12 bp median offset), so a gene page can
+# draw on either without them contradicting each other.
+
+
+def has_genome_layer() -> bool:
+    """False on a database built before the genome layer, so tabs can degrade
+    rather than raise. Not cached: it gates the cached readers below."""
+    try:
+        get_con().execute("SELECT 1 FROM elements LIMIT 1")
+        return True
+    except Exception:
+        return False
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_program_families() -> pd.DataFrame:
+    return get_con().execute(
+        "SELECT * FROM program_families ORDER BY n_elements DESC"
+    ).df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_genome_programs(family: int | None = None) -> pd.DataFrame:
+    if family is None:
+        return get_con().execute(
+            "SELECT * FROM genome_programs ORDER BY program").df()
+    return get_con().execute(
+        "SELECT * FROM genome_programs WHERE family = ? ORDER BY n_elements DESC",
+        [family]).df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_elements_for_gene(gene_name: str) -> pd.DataFrame:
+    """Every element whose NEAREST gene is this one, with program and family.
+
+    n_tss_comparably_close travels with the row deliberately: 56.6% of distal
+    elements have a rival TSS within twice the distance, so a caller that drops
+    it turns a locator into a regulatory assignment the data cannot support.
+    """
+    return get_con().execute(
+        """SELECT e.element_id, e.chrom, e.start, e."end", e.peak, e.width,
+                  e.dist_to_tss, e.stratum, e.n_tfs_assigned,
+                  e.n_tss_comparably_close, e.cluster_id, e.cluster_size,
+                  p.dominant_program AS program, p.dominant_weight AS weight,
+                  g.family, g.substantive, g.seed_stability, g.top_tfs
+           FROM elements e
+           JOIN element_program p USING (element_id)
+           JOIN genome_programs g ON g.program = p.dominant_program
+           WHERE e.nearest_gene_name = ?
+           ORDER BY ABS(e.dist_to_tss)""", [gene_name]).df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_family_labels() -> dict:
+    """{family: 'TF1 / TF2 / TF3'} for legends and axis labels."""
+    df = get_con().execute(
+        "SELECT family, top_tfs FROM program_families").df()
+    return {int(r.family): " / ".join(str(r.top_tfs).split(", ")[:3])
+            for _, r in df.iterrows()}
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_genes_in_family(family: int, limit: int = 200) -> pd.DataFrame:
+    """Genes with the most elements in a family.
+
+    PROMOTER-stratum elements only, ranked by count then by total loading.
+
+    Two ranking traps, both measured rather than anticipated. Counting ALL
+    strata returns segmental duplications and repeat clusters -- for the PRC2
+    family it gave SRGAP2C (217 elements), TUBA3C, TPTE, ZNF716, 95-100% of
+    them distal -- because repetitive regions accumulate spurious peaks. And
+    counting promoter elements alone is a near-total tie, since most genes have
+    exactly one, so the gene name silently becomes the sort key and the list
+    runs alphabetically from the third entry.
+
+    Restricting to the promoter stratum also sidesteps the ambiguity that makes
+    distal attribution unsafe (56.6% of distal elements have a rival TSS within
+    twice the distance). n_distal is still returned, for display, not ranking.
+
+    This is a lookup, not an assignment: diag_gene_coherence.py found gene
+    identity carries no information about an element's program once genomic
+    distance is controlled.
+    """
+    return get_con().execute(
+        """SELECT e.nearest_gene_name AS gene_name,
+                  COUNT(*) FILTER (WHERE e.stratum = 'promoter') AS n_promoter,
+                  COUNT(*) FILTER (WHERE e.stratum = 'distal') AS n_distal,
+                  COUNT(*) AS n_elements,
+                  SUM(CASE WHEN e.stratum = 'promoter'
+                           THEN p.dominant_weight ELSE 0 END) AS promoter_weight
+           FROM elements e
+           JOIN element_program p USING (element_id)
+           JOIN genome_programs g ON g.program = p.dominant_program
+           WHERE g.family = ? AND e.nearest_gene_name IS NOT NULL
+           GROUP BY 1
+           HAVING COUNT(*) FILTER (WHERE e.stratum = 'promoter') > 0
+           ORDER BY n_promoter DESC, promoter_weight DESC
+           LIMIT ?""",
+        [family, limit]).df()
