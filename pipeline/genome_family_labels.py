@@ -76,6 +76,15 @@ MIN_OVERLAP = 3              # 2/5 produced "protein folding chaperone" for
 # lineage", and the myeloid family became "mammary gland involution". A
 # floor on BP set size keeps the terms broad enough to be names.
 MIN_SET_SIZE_BP = 10
+# A COMPLEX that names a set of co-binding TFs should itself be a TF
+# complex. The labels that came out wrong were terms about something else
+# that happen to contain a few TFs: apical junction complex is 7 TFs of 157
+# genes (0.04), ER protein containing complex 4 of 131 (0.03), golgi
+# membrane 13 of 712 (0.02). Every correct label sits above 0.68 -- AP-1
+# 1.00, ESC/E(Z) 0.94, PcG 0.83, cohesin 0.75, bBAF 0.70, Sin3 0.68 -- so
+# the two groups separate cleanly. Applied to CC ONLY: a biological PROCESS
+# legitimately involves non-TFs, and this filter would erase all of BP.
+MIN_TF_FRACTION_CC = 0.5
 
 
 def _log(m):
@@ -135,8 +144,12 @@ def main() -> int:
             # "presynaptic cytosol" (3/5), the erythroid one "golgi
             # membrane" (3/13). BP and MF have no such failure mode: a
             # process or an activity IS a reasonable name for a TF set.
-            if lib == "CC" and "COMPLEX" not in k.upper():
-                continue
+            if lib == "CC":
+                if "COMPLEX" not in k.upper():
+                    continue
+                n_all = len(set(v["geneSymbols"]))
+                if n_all and len(st) / n_all < MIN_TF_FRACTION_CC:
+                    continue
             floor = MIN_SET_SIZE_BP if lib in ("BP", "MF") else MIN_SET_SIZE
             if floor <= len(st) <= MAX_SET_SIZE:
                 sets[k] = st
