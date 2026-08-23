@@ -745,16 +745,25 @@ def gtex_module_target_evidence(transcript_id: str) -> pd.DataFrame:
     fn = GTEX_DIR / "module_target_correlation.parquet"
     if not fn.exists():
         return pd.DataFrame()
+    # module_program exists only when the promoter build carries its own
+    # factorization. Under the hybrid architecture it does not -- programs come
+    # from the genome build, and modules have no promoter-program assignment.
+    # The program column was decoration here; the module/target evidence is the
+    # point, so it degrades instead of failing the whole panel.
+    prog_sel, prog_join = "", ""
+    if _table_exists("module_program"):
+        prog_sel = "mp.dominant_program,"
+        prog_join = "JOIN module_program mp ON m.module_id = mp.module_id"
     return get_con().execute(
-        """
+        f"""
         SELECT m.module_id, m.center_offset, m.width,
-               mp.dominant_program,
+               {prog_sel}
                mt.r_module_target, mt.top_driver_tf, mt.top_driver_r,
                mt.n_tfs_high_r, mt.n_supporting_tissues,
                mt.top_supporting_tissue
         FROM read_parquet(?) mt
         JOIN modules m ON mt.module_id = m.module_id
-        JOIN module_program mp ON m.module_id = mp.module_id
+        {prog_join}
         WHERE m.transcript_id = ?
         ORDER BY m.center_offset
         """,
@@ -1102,6 +1111,13 @@ def gtex_program_tf_tissue_matrix(
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
+# ORPHANED by the move to one program vocabulary. These read outputs of
+# gtex_regulatory_evidence.001.py, which keys everything on the PROMOTER
+# factorization's program numbers -- a numbering the site no longer uses. They
+# have no callers. Left in place rather than deleted because re-deriving
+# tissue specificity for the genome programs is a real and wanted analysis
+# (per program, the tissue specificity of the genes near its elements), and
+# these are the shape it should land in.
 def gtex_program_tissue_specificity() -> pd.DataFrame:
     fn = GTEX_DIR / "program_tissue_specificity.tsv"
     if not fn.exists():
@@ -1208,6 +1224,14 @@ def load_aggregate_matrix(flavor: str = "binary") -> pd.DataFrame:
 # tables above are unchanged: the regression gate showed both layers see the
 # same promoters (98.2% recovery at 12 bp median offset), so a gene page can
 # draw on either without them contradicting each other.
+
+
+def _table_exists(name: str) -> bool:
+    try:
+        get_con().execute(f"SELECT 1 FROM {name} LIMIT 1")
+        return True
+    except Exception:
+        return False
 
 
 def has_genome_layer() -> bool:

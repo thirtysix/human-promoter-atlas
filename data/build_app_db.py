@@ -677,7 +677,20 @@ def copy_gtex_outputs():
         shutil.copy2(src, dst)
         _log(f"  gtex: {src.name} ({dst.stat().st_size/1e6:.1f} MB) "
              f"-> data/gtex/")
-    for tsv_name in ("tissue_index.tsv", "program_tissue_specificity.tsv"):
+    tsvs = ["tissue_index.tsv"]
+    # program_tissue_specificity.tsv is keyed on the PROMOTER factorization's
+    # program numbers. Under the hybrid architecture the site numbers programs
+    # from the genome build, so shipping this file would put a table of
+    # "program 7" tissue specificity next to a completely different program 7.
+    # A stale copy on disk is worse than none: it would look current.
+    if _promoter_programs_available():
+        tsvs.append("program_tissue_specificity.tsv")
+    else:
+        stale = src_dir / "program_tissue_specificity.tsv"
+        if stale.exists():
+            _log("  gtex: skipping program_tissue_specificity.tsv "
+                 "(keyed on promoter program numbers the site no longer uses)")
+    for tsv_name in tsvs:
         src = src_dir / tsv_name
         if src.exists():
             shutil.copy2(src, dst_dir / src.name)
