@@ -210,6 +210,50 @@ def load_genome_programs(con, root: Path, k: int):
     _log(f"  genome_program_tf_top: {len(t):,} rows")
 
 
+def load_program_families(con, root: Path, k: int):
+    """Named families over the programs -- the app's browsable vocabulary.
+
+    Families group programs by CO-OCCURRENCE across elements, not by shared
+    TFs. That distinction matters for how the UI should describe them: PRC2 and
+    PRC1.1 are one family here because they occupy the same domains, not
+    because they share subunits (they share almost none). A family is "these
+    programs mark the same places", which is a claim about chromatin, not about
+    protein complexes.
+    """
+    fdir = root / f"program_families.k{k}"
+    if not fdir.exists():
+        _log(f"  no {fdir.name}; skipping families "
+             f"(run pipeline/genome_program_families.py)")
+        return
+    pf = pd.read_csv(fdir / "program_family.tsv", sep="\t")
+    fs = pd.read_csv(fdir / "family_summary.tsv", sep="\t")
+
+    _exec(con, "DROP TABLE IF EXISTS program_families;")
+    con.register("fs_df", fs)
+    _exec(con, "CREATE TABLE program_families AS SELECT * FROM fs_df;")
+    con.unregister("fs_df")
+    _exec(con, "CREATE INDEX idx_pf_family ON program_families(family);")
+    _log(f"  program_families: {len(fs):,} rows")
+
+    # attach the family to each program so a program page can name its family
+    # without a second query
+    con.register("pfm_df", pf[["program", "family"]])
+    _exec(con, "ALTER TABLE genome_programs ADD COLUMN family INTEGER;")
+    _exec(con, """
+        UPDATE genome_programs SET family = (
+            SELECT m.family FROM pfm_df m WHERE m.program = genome_programs.program
+        );""")
+    con.unregister("pfm_df")
+    n = con.execute(
+        "SELECT COUNT(*) FROM genome_programs WHERE family IS NULL").fetchone()[0]
+    if n:
+        raise SystemExit(f"{n} programs have no family -- program_family.tsv "
+                         f"and the factorization disagree")
+    _exec(con, "CREATE INDEX idx_gp_family ON genome_programs(family);")
+    _log(f"  genome_programs.family populated for all "
+         f"{len(pf):,} programs")
+
+
 ################################################################################
 # Execution ####################################################################
 ################################################################################
@@ -226,6 +270,7 @@ def main() -> int:
     el = load_elements(con, root)
     load_element_programs(con, root, args.k, len(el))
     load_genome_programs(con, root, args.k)
+    load_program_families(con, root, args.k)
 
     # what a gene page will actually run
     q = con.execute("""
