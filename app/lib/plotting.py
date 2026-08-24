@@ -430,7 +430,49 @@ def fig_program_tf_tissue_heatmap(
 # ---------------------------------------------------------------------------
 # Per-transcript explorer  — the load-bearing custom view
 # ---------------------------------------------------------------------------
-def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "") -> None:
+def _structure_title(dir_cue: str = "", n_hidden: int = 0) -> str:
+    """The structure track's subplot title.
+
+    One builder rather than a literal at make_subplots time and a second
+    string-surgery pass afterwards: the direction cue and the overflow count
+    are only known once the track has been drawn, and a title assembled in two
+    places is a title that drifts.
+    """
+    parts = "thick = CDS, thin = UTR" + (f", {dir_cue}" if dir_cue else "")
+    title = f"protein-coding structure ({parts})"
+    return title + (f"  — +{n_hidden} more not shown" if n_hidden else "")
+
+
+def _chevron_positions(g: pd.DataFrame) -> list[float]:
+    """Chevron x positions for one transcript lane: inside introns only.
+
+    Exon spans are merged first — `exon` and `five_prime_utr` rows describe
+    the same stretch of sequence, so treating each row as its own block would
+    invent gaps that are not introns. A promoter window often shows a single
+    first exon and nothing else (TP53 gives 0..113 bp and stops), which leaves
+    no gap and therefore no chevron; the axis label carries the direction in
+    that case.
+    """
+    spans = sorted(zip(g.local_start.astype(float), g.local_end.astype(float)))
+    merged: list[list[float]] = []
+    for s, e in spans:
+        if merged and s <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
+    xs: list[float] = []
+    for i in range(len(merged) - 1):
+        lo, hi = merged[i][1], merged[i + 1][0]
+        if hi - lo < CHEVRON_MIN_GAP:
+            continue
+        n = max(1, int((hi - lo) // CHEVRON_STEP))
+        step = (hi - lo) / (n + 1)
+        xs += [lo + step * (j + 1) for j in range(n)]
+    return xs
+
+
+def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "",
+                        focal_strand: str = "+") -> int:
     """Exon/CDS models as a genome-browser style track.
 
     Drawn directly under the density curve rather than at the bottom: the rug
@@ -441,6 +483,13 @@ def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "") -> 
     convention, so coding extent is readable at a glance. Neighbouring genes
     are kept and drawn muted -- a promoter sitting inside another gene is the
     case a reader most needs to see, not one to filter away.
+
+    Chevrons on the backbone give transcription direction, so an element can
+    be read as sitting on a transcript's 5' or 3' side rather than merely to
+    its left or right. `focal_strand` is the strand the local coordinates were
+    flipped by, which is what makes a lane's own strand meaningful: same
+    strand runs left-to-right in this view, opposite strand runs the other
+    way. Returns the number of lanes that did not fit.
     """
     if gs is None or gs.empty:
         return 0
@@ -474,7 +523,13 @@ def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "") -> 
         rep = focal_tx if focal_tx in members else sorted(members)[0]
         reps.append(rep)
         extra = f"  ×{len(members)}" if len(members) > 1 else ""
-        labels.append(rep + extra + ("  ←" if rep == focal_tx else ""))
+        # The focal transcript is marked by WEIGHT, not by a trailing "←".
+        # An arrow here now sits beside the direction chevrons in the track
+        # and reads as a second, contradictory direction cue; bold says
+        # "this one" without pointing anywhere, and it drops three characters
+        # off the longest label, which is where the clipping came from.
+        text = rep + extra
+        labels.append(f"<b>{text}</b>" if rep == focal_tx else text)
         for t in members:
             lanes[t] = len(reps) - 1
     # lane 0 renders at the BOTTOM of a y-axis, so the focal transcript was
@@ -485,6 +540,8 @@ def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "") -> 
     order = reps
     n_total = n_groups
     drawn = set()
+    n_chevrons = 0
+    senses: set[bool] = set()
     for label, g in gs.groupby(key):
         if label not in lanes:
             continue
@@ -499,6 +556,25 @@ def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "") -> 
             x=[g.local_start.min(), g.local_end.max()], y=[lane, lane],
             mode="lines", line=dict(color=colour, width=1),
             hoverinfo="skip", showlegend=False), row=row, col=1)
+
+        # Direction chevrons. Local coordinates were flipped by the focal
+        # strand, so a lane on that same strand transcribes left-to-right.
+        same = str(g.strand.iloc[0]) == str(focal_strand)
+        senses.add(same)
+        xs = _chevron_positions(g)
+        if xs:
+            n_chevrons += len(xs)
+            fig.add_trace(go.Scatter(
+                x=xs, y=[lane] * len(xs), mode="markers",
+                marker=dict(symbol="triangle-right" if same else "triangle-left",
+                             size=6, color=colour,
+                             opacity=0.9 if focal else 0.5,
+                             line=dict(width=0)),
+                hovertemplate=(f"<b>{label}</b><br>transcribed "
+                                + ("5′→3′ left to right" if same
+                                   else "5′→3′ right to left")
+                                + "<extra></extra>"),
+                showlegend=False), row=row, col=1)
         for _, f in g.iterrows():
             # NMD transcripts pass the protein_coding GENE filter but are not
             # translated -- drawn hollow so they are not read as coding.
@@ -519,13 +595,33 @@ def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "") -> 
                                + (f" {int(f.exon_number)}" if f.exon_number else "")
                                + "<br>%{x:+,.0f} bp<extra></extra>"),
                 showlegend=False), row=row, col=1)
+    # automargin, because the tick text is a full Ensembl ID plus a "×N"
+    # suffix and the left margin is otherwise sized for the density axis
+    # title -- long IDs were being clipped. The rug axis below already does
+    # this, so the two agree on one margin rather than fighting over it.
     fig.update_yaxes(row=row, col=1, tickmode="array",
                      tickvals=list(range(len(seen))), ticktext=seen,
-                     range=[-0.6, len(seen) - 0.4], showgrid=False)
+                     range=[-0.6, len(seen) - 0.4], showgrid=False,
+                     automargin=True)
     # The overflow count goes in the subplot title, not an annotation. Anchored
     # with xref="paper" alongside row/col it landed on top of a transcript lane
     # rather than in the margin.
-    return max(0, n_total - len(seen))
+    #
+    # The direction cue is built here rather than by the caller because only
+    # this function knows what actually got drawn. A promoter window usually
+    # shows one first exon and no intron -- 38 of 60 sampled genes, TP53 among
+    # them -- so a fixed "▶ = 5′→3′" legend would name a symbol that is not on
+    # screen. When every lane shares the focal strand (the normal case, since
+    # the structure query is filtered to one gene) the direction is a property
+    # of the whole track and can just be stated.
+    if len(senses) != 1:
+        cue = "▶ = 5′→3′"          # mixed strands: only the chevrons can say
+    else:
+        cue = ("5′→3′ left to right" if senses == {True}
+               else "5′→3′ right to left")
+        if n_chevrons:
+            cue += ", ▶"
+    return max(0, n_total - len(seen)), cue
 
 
 def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
@@ -616,7 +712,7 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
         rug_title += f" — filtered from {n_tfs_total}"
     titles = ["KDE density (per-TF mass=1)"]
     if has_gs:
-        titles.append("protein-coding structure (thick = CDS, thin = UTR)")
+        titles.append(_structure_title())
     titles += [rug_title,
               "all modules — colored by k=10 dominant program"]
     titles += [f"P{p} only — {prog_reading.get(p, '')}" for p in program_rows]
@@ -669,13 +765,20 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
         )
 
     if has_gs:
-        n_hidden = _add_gene_structure(
+        n_hidden, dir_cue = _add_gene_structure(
             fig, gene_structure, row_gs,
-            focal_tx=str(tss_meta.get("transcript_id", "")))
-        if n_hidden and fig.layout.annotations:
+            focal_tx=str(tss_meta.get("transcript_id", "")),
+            focal_strand=str(tss_meta.get("strand", "+")))
+        # The direction cue names only what was drawn -- see _add_gene_structure
+        # -- so the title never advertises a chevron that is not on screen.
+        # Matched on the exact placeholder, not a prefix: subplot titles are
+        # plain annotations and the rug's title starts with a variable string.
+        placeholder = _structure_title()
+        final = _structure_title(dir_cue, n_hidden)
+        if final != placeholder:
             for a in fig.layout.annotations:
-                if a.text and a.text.startswith("protein-coding structure"):
-                    a.text += f"  — +{n_hidden} more not shown"
+                if a.text == placeholder:
+                    a.text = final
                     break
 
     # (2) TF rug rows — TF identity = color, one solid hue per row.
@@ -746,13 +849,19 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
     # (3) All modules ribbon (overview)
     _add_module_blocks(fig, modules_df, row=row_mod)
 
-    # (4..) Per-program rows
+    # (4..) Per-program rows.
+    # Derived from row_mod, not the literal 4 these used to be. With the
+    # structure track inserted above, row_mod is itself 4, so the first
+    # program row was drawing INTO the all-modules ribbon and the last row
+    # was left empty -- which then loses its module bands too, since plotly
+    # drops shapes on a trace-less subplot. Latent today only because the
+    # promoter factorization is off by default and dominant_program is NULL.
     for i, p in enumerate(program_rows):
         sub = modules_df[modules_df["dominant_program"] == p]
-        _add_module_blocks(fig, sub, row=4 + i)
+        _add_module_blocks(fig, sub, row=row_mod + 1 + i)
         # Y-axis label as P{n} on the left
         fig.update_yaxes(
-            title_text=f"<b>P{p}</b>", row=4 + i, col=1,
+            title_text=f"<b>P{p}</b>", row=row_mod + 1 + i, col=1,
             visible=True, range=[-1, 1],
             showticklabels=False, showgrid=False,
             title_standoff=4,
@@ -787,8 +896,13 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
                 x0=m["lo_offset"], x1=m["hi_offset"], fillcolor=band,
                 opacity=0.11, line_width=0, layer="below", row=_r, col=1,
             )
-    fig.update_xaxes(title_text="bp from TSS (txn-oriented)",
-                      row=n_rows, col=1)
+    # "txn-oriented" alone does not tell a reader which end of a transcript
+    # an element sits on. Local coordinates are flipped by the focal strand,
+    # so downstream is always to the right whatever the gene's genomic strand.
+    fig.update_xaxes(
+        title_text="← upstream (5′)　　bp from TSS (txn-oriented)　　"
+                    "downstream (3′) →",
+        row=n_rows, col=1)
     fig.update_yaxes(title_text="density", row=1, col=1, showgrid=False)
     fig.update_yaxes(title_text="all", row=row_mod, col=1,
                       visible=True, range=[-1, 1],
@@ -1269,6 +1383,13 @@ FAMILY_COLORS = (pc.qualitative.Dark24 + pc.qualitative.Light24)
 # Transcript lanes drawn in the structure track before overflow is summarised.
 MAX_STRUCTURE_LANES = 6
 
+# Direction chevrons on the transcript backbone. Only drawn in the gaps
+# BETWEEN exons -- a chevron laid over an exon box reads as part of the gene
+# model rather than an annotation of it -- so a gap has to be wide enough to
+# hold one before it gets any.
+CHEVRON_MIN_GAP = 120      # bp
+CHEVRON_STEP    = 300      # bp between chevrons within one gap
+
 # Target gap between subplot rows, in pixels. Converted to a
 # fraction at build time -- plotly's vertical_spacing is relative
 # to figure height, so a fixed fraction grows with TF count.
@@ -1372,7 +1493,7 @@ def fig_gene_neighbourhood(el: pd.DataFrame, lo: float, hi: float,
                         "(%{customdata[1]} TSS within 2x)<extra></extra>")))
     fig.update_layout(
         title=(f"{gene}: elements in view" if gene else "elements in view"),
-        xaxis_title="distance from TSS (bp)",
+        xaxis_title="← upstream (5′)　　distance from TSS (bp)　　downstream (3′) →",
         yaxis_title="TFs assigned",
         height=380, margin=dict(l=60, r=20, t=50, b=50),
         legend=dict(font=dict(size=10)))
