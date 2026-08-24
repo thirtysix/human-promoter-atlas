@@ -621,10 +621,21 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
               "all modules — colored by k=10 dominant program"]
     titles += [f"P{p} only — {prog_reading.get(p, '')}" for p in program_rows]
 
+    # Figure height first, because the row gap depends on it.
+    #
+    # vertical_spacing is a FRACTION of total height, not a fixed gap. At 0.025
+    # it read fine on IL2RG (42 TFs, ~1,156 px -> ~26 px gaps) and fell apart on
+    # BRCA2 (376 TFs, ~7,170 px -> ~180 px gaps, ~540 px of whitespace across
+    # three rows). Converting a pixel target into a fraction keeps the gap
+    # constant whatever the TF count.
+    height = int(60 + 220 + max(120, 18 * n_tfs) + 60 + n_prog * 55 + 60
+                 + (int(gs_h * 150) if has_gs else 0))
+    v_space = min(0.03, ROW_GAP_PX / max(height, 1))
+
     fig = make_subplots(
         rows=n_rows, cols=1, shared_xaxes=True,
         row_heights=row_heights,
-        vertical_spacing=0.025,
+        vertical_spacing=v_space,
         subplot_titles=titles,
     )
 
@@ -792,7 +803,6 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
              f"{n_prog} program{'s' if n_prog != 1 else ''} present "
              f"({len(modules_df)} module{'s' if len(modules_df) != 1 else ''})")
 
-    height = int(60 + 220 + max(120, 18 * n_tfs) + 60 + n_prog * 55 + 60)
     fig.update_layout(
         title=title, height=height,
         margin=dict(l=100, r=20, t=70, b=50),
@@ -1258,6 +1268,11 @@ FAMILY_COLORS = (pc.qualitative.Dark24 + pc.qualitative.Light24)
 
 # Transcript lanes drawn in the structure track before overflow is summarised.
 MAX_STRUCTURE_LANES = 6
+
+# Target gap between subplot rows, in pixels. Converted to a
+# fraction at build time -- plotly's vertical_spacing is relative
+# to figure height, so a fixed fraction grows with TF count.
+ROW_GAP_PX = 26
 
 
 def gene_zoom_levels(dist, promoter_half: int = OUTER_HALF,
