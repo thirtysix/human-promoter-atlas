@@ -276,6 +276,45 @@ def load_program_families(con, root: Path, k: int):
          f"{len(pf):,} programs")
 
 
+def load_module_element_map(con, regression_dir):
+    """Link each promoter module to the genome element at the same locus.
+
+    This is what lets a module inherit annotation. On its own a module is a
+    span and some counts; through its element it reaches a program, that
+    program's family, and the family's enrichment terms -- the layers that
+    actually say what it is.
+
+    The mapping comes from genome_promoter_regression.py, which matched them by
+    peak position: 98.2% of modules meeting the genome support floor have an
+    element within a median 12 bp. Modules below that floor have none, and get
+    NULL rather than a forced nearest-neighbour.
+    """
+    if not regression_dir:
+        _log("  no --regression-dir; modules will not link to programs")
+        return
+    fn = Path(regression_dir) / "module_to_element.tsv"
+    if not fn.exists():
+        _log(f"  {fn} not found; modules will not link to programs")
+        return
+    m = pd.read_csv(fn, sep="\t")
+    m = m[m.eid >= 0][["module_id", "eid", "dist"]].rename(
+        columns={"eid": "element_id", "dist": "match_bp"})
+    _exec(con, "DROP TABLE IF EXISTS module_element;")
+    con.register("me_df", m)
+    _exec(con, """
+        CREATE TABLE module_element (
+            module_id  INTEGER PRIMARY KEY,
+            element_id INTEGER,
+            match_bp   INTEGER
+        );""")
+    _exec(con, "INSERT INTO module_element SELECT * FROM me_df;")
+    con.unregister("me_df")
+    _exec(con, "CREATE INDEX idx_me_el ON module_element(element_id);")
+    n_mod = con.execute("SELECT COUNT(*) FROM modules").fetchone()[0]
+    _log(f"  module_element: {len(m):,} of {n_mod:,} modules linked to an "
+         f"element (median {int(m.match_bp.median())} bp offset)")
+
+
 ################################################################################
 # Execution ####################################################################
 ################################################################################
@@ -284,6 +323,11 @@ def main() -> int:
     ap.add_argument("--genome-dir", required=True)
     ap.add_argument("--k", type=int, required=True)
     ap.add_argument("--db", default="data/canonical_promoter.duckdb")
+    ap.add_argument("--regression-dir", default=None,
+                    help="genome_promoter_regression.py output, which carries "
+                         "module_to_element.tsv. Without it a promoter module "
+                         "cannot reach the genome layer's programs and "
+                         "families, and the module view stays sparse.")
     args = ap.parse_args()
     root = Path(args.genome_dir)
 
@@ -312,6 +356,7 @@ def main() -> int:
     ).fetchone()[0]
     print(f"\n  sample gene-page query (SOX2), {len(ex)} of {total} elements:")
     print(ex.to_string(index=False))
+    load_module_element_map(con, args.regression_dir)
     _write_genome_manifest(con, root, args.k, Path(args.db))
     con.close()
     return 0

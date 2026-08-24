@@ -1461,3 +1461,37 @@ def get_program_distance_hist(program: int, bins: int = 40) -> pd.DataFrame:
            FROM elements e JOIN element_program p USING (element_id)
            WHERE p.dominant_program = ?
            GROUP BY 1 ORDER BY 1""", [bins, program]).df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_module_annotation(transcript_id: str) -> pd.DataFrame:
+    """Each promoter module with the genome-layer annotation it inherits.
+
+    A module on its own is a span and some counts. Through the element at the
+    same locus it reaches a program, that program's family, and the family's
+    enrichment label -- which is what actually says what the module is.
+
+    Modules below the genome support floor have no element and come back with
+    NULLs. That is 54,794 of 117,006: the promoter pipeline keeps modules the
+    genome floor of 11 assigned TFs rejects, so the absence is a real statement
+    about evidence rather than a lookup failure, and the caller should say so.
+    """
+    if not _table_exists("module_element"):
+        return pd.DataFrame()
+    return get_con().execute(
+        """
+        SELECT m.module_id, m.center_offset, m.width, m.n_tfs_assigned,
+               me.element_id, me.match_bp,
+               e.stratum, e.n_tss_comparably_close,
+               ep.dominant_program AS program, ep.dominant_weight AS weight,
+               g.substantive, g.seed_stability, g.top_tfs AS program_tfs,
+               g.family, f.label AS family_label, f.top_tfs AS family_tfs
+        FROM modules m
+        LEFT JOIN module_element me   ON me.module_id = m.module_id
+        LEFT JOIN elements e          ON e.element_id = me.element_id
+        LEFT JOIN element_program ep  ON ep.element_id = me.element_id
+        LEFT JOIN genome_programs g   ON g.program = ep.dominant_program
+        LEFT JOIN program_families f  ON f.family = g.family
+        WHERE m.transcript_id = ?
+        ORDER BY m.center_offset
+        """, [transcript_id]).df()

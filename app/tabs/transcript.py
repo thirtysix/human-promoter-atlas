@@ -17,7 +17,8 @@ HELP_SCORE_RANGE = (
     "Filter for the TF rug panel only — peaks outside this score range are "
     "hidden from the visualization but kept for the per-TSS density. "
     "ChIP-atlas peak score scales 0–1000 by how many experiments support "
-    "the peak. Module discovery used score ≥ 500. Each TF gets its own "
+    "the peak. Module discovery used the build's assignment score. "
+    "Each TF gets its own "
     "row and its own color; hover any tick to see its exact score."
 )
 HELP_MODULES_TABLE = (
@@ -38,7 +39,7 @@ def render() -> None:
         title="Per-transcript view — what's happening at this promoter",
         what="The full module decomposition of a single canonical promoter: "
              "smoothed density of TF binding, every individual TF binding "
-             "within ±1.5 kb at score ≥ 500, and the modules detected from "
+             "within ±1.5 kb at the assignment score, and the modules detected from "
              "that density — each colored by its dominant k=10 program.",
         objective="Answer 'what TFs control THIS gene, in what positions, "
                    "and which of the 10 archetypal programs do they "
@@ -178,7 +179,12 @@ def render() -> None:
         c_score, c_filter = st.columns([1, 2])
         with c_score:
             score_range = st.slider(
-                "peak score range", 0, 1000, (500, 1000), step=50,
+                # Default starts at the build's assignment threshold, not a
+                # literal 500. At 500 on a build that assigns at 250 the plot
+                # opened hiding peaks the modules were actually built from, so
+                # the rug disagreed with the module blocks drawn over it.
+                "peak score range", 0, 1000,
+                (db.min_score_assign(), 1000), step=50,
                 help=HELP_SCORE_RANGE,
                 key=f"tx_score_range_{tx_id}",
             )
@@ -217,6 +223,7 @@ def render() -> None:
     # compress the promoter region to a few pixels, so the wider neighbourhood
     # gets its own zoom hierarchy, with the promoter box marked at every level
     # so the relationship stays legible.
+    modules_df.attrs["transcript_id"] = tx_id
     _render_module_composition(modules_df, peaks_df)
     _render_neighbourhood(tss_meta)
 
@@ -353,7 +360,7 @@ def render() -> None:
                             "binds promoter (assigned)",
                             help="True if this TF has at least one peak "
                                  "in the focal TSS's ±1.5 kb window with "
-                                 "score ≥ 500. A binding-AND-correlation "
+                                 "the assignment score. A binding-AND-correlation "
                                  "co-occurrence is the strongest "
                                  "tissue-level evidence."),
                     },
@@ -490,7 +497,7 @@ def render() -> None:
                     "n_tfs_assigned":   st.column_config.NumberColumn(
                         f"TFs (≥{db.min_score_assign()})", width="small",
                         help="# distinct TFs with at least one core "
-                             "score ≥ 500 peak in this module — the strict "
+                             "assigned-score peak in this module — the strict "
                              "TF assignment used downstream."),
                     "dominant_program": st.column_config.NumberColumn(
                         "program", width="small",
@@ -651,7 +658,7 @@ def render() -> None:
                                 "tf":           st.column_config.TextColumn(
                                     "TF",
                                     help="TF that binds this TSS at "
-                                         "score ≥ 500. Only TFs in DepMap's "
+                                         "the assignment score. Only TFs in DepMap's "
                                          "Chronos panel are shown."),
                                 "r":            st.column_config.NumberColumn(
                                     "r", format="%.2f",
@@ -910,6 +917,12 @@ def _render_module_composition(modules_df, peaks_df) -> None:
     if modules_df.empty or peaks_df.empty:
         return
     thr = db.min_score_assign()
+
+    # What each module maps to in the genome layer. A module on its own is a
+    # span and some counts; through the element at the same locus it inherits a
+    # program, a family and the family's enrichment label, which is what says
+    # what it is.
+    ann = db.get_module_annotation(str(modules_df.attrs.get("transcript_id", "")) )
     with st.container(border=True):
         st.markdown(
             "### What's in each module",
@@ -918,6 +931,26 @@ def _render_module_composition(modules_df, peaks_df) -> None:
                  f"to assign a TF to a module -- the rest bind but did not "
                  f"clear it. Positions are bp from the TSS.",
         )
+        if ann is not None and not ann.empty:
+            show = ann[["module_id", "center_offset", "n_tfs_assigned",
+                        "program", "family_label", "program_tfs",
+                        "substantive", "match_bp"]].copy()
+            n_link = int(show.program.notna().sum())
+            st.caption(
+                f"{n_link} of {len(show)} modules map to a genome-wide element "
+                f"and inherit its program and family. The rest fall below the "
+                f"genome support floor of 11 assigned TFs — the promoter "
+                f"pipeline keeps modules that floor rejects, so a blank here "
+                f"is a statement about evidence, not a missing lookup."
+            )
+            st.dataframe(
+                show.rename(columns={
+                    "module_id": "module", "center_offset": "center (bp)",
+                    "n_tfs_assigned": "TFs", "program": "program",
+                    "family_label": "family", "program_tfs": "program TFs",
+                    "substantive": "substantive", "match_bp": "offset (bp)"}),
+                hide_index=True, use_container_width=True)
+
         labels = {
             int(r.module_id): (f"M{int(r.module_id)}  ({int(r.center_offset):+d} bp"
                                f" · {int(r.n_tfs_assigned)} assigned"
