@@ -37,6 +37,7 @@ import datetime as dt
 from pathlib import Path
 
 import numpy as np
+import os
 import pandas as pd
 
 # Machine-specific paths and build axes -> pipeline/config.py
@@ -114,8 +115,22 @@ def main():
     modules = pd.read_csv(MODULES_FN, sep="\t",
                            usecols=["module_id", "tss_id", "transcript_id",
                                     "lo_offset", "hi_offset"])
-    mp = pd.read_csv(MP_FN, sep="\t",
-                      usecols=["module_id", "dominant_program"])
+    # Only the program-tau stage needs the promoter factorization. The three
+    # module-level outputs -- which are what the per-transcript view actually
+    # renders -- do not touch it, so a build whose programs come from the
+    # genome layer still gets them instead of failing at load.
+    mp = None
+    # EXPLICIT, not detection. Stale nmf.k*.module_program.tsv files sit in most
+    # build directories, so existence alone made this compute a program tau for
+    # P1-P10 -- a promoter numbering the site no longer serves. Same trap that
+    # moved data/build_app_db.py to a flag.
+    if os.environ.get("HPA_PROMOTER_PROGRAMS", "0") in ("1", "true", "True") \
+            and MP_FN.exists():
+        mp = pd.read_csv(MP_FN, sep="\t",
+                          usecols=["module_id", "dominant_program"])
+    else:
+        _log(f"  no {MP_FN.name}: skipping program tissue-specificity. "
+             f"The module-level outputs are unaffected.")
     tf_idx = pd.read_csv(TF_INDEX_FN, sep="\t")
     tf_idx_to_name = dict(zip(tf_idx["tf_idx"], tf_idx["TF"]))
 
@@ -315,6 +330,10 @@ def main():
     # 3) program_tissue_specificity: tau over averaged module-tissue activity
     #    per program.
     # ------------------------------------------------------------------------
+    if mp is None:
+        _log("skipping program tissue-specificity (no promoter factorization); "
+             "module-level outputs above are complete")
+        return 0
     _log(f"computing program tissue-specificity (tau) — filtering to "
          f"tissues with >= {MIN_SAMPLES_FOR_TAU} samples")
     activity = activity.merge(mp, on="module_id", how="left")
