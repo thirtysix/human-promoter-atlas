@@ -643,10 +643,16 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
         raw = m.get("dominant_program")
         fillcolor = (PROGRAM_COLORS[(int(raw) - 1) % len(PROGRAM_COLORS)]
                      if pd.notna(raw) else REFERENCE)
+        # Span EVERY row, not just the density. With shared_xaxes the bands
+        # line up down the whole figure, so a module's extent can be read
+        # against the transcript structure, the TF rug and the program rows at
+        # once -- the standard genome-browser guide. Opacity is lower than the
+        # single-row version was: the same 0.18 laid over a dense rug muddied
+        # the tick colours it is meant to help you read.
         fig.add_vrect(
             x0=m["lo_offset"], x1=m["hi_offset"],
             fillcolor=fillcolor,
-            opacity=0.18, line_width=0, layer="below", row=1, col=1,
+            opacity=0.11, line_width=0, layer="below", row="all", col=1,
         )
 
     if has_gs:
