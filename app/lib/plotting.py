@@ -430,11 +430,60 @@ def fig_program_tf_tissue_heatmap(
 # ---------------------------------------------------------------------------
 # Per-transcript explorer  — the load-bearing custom view
 # ---------------------------------------------------------------------------
+def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "") -> None:
+    """Exon/CDS models as a genome-browser style track.
+
+    Drawn directly under the density curve rather than at the bottom: the rug
+    grows with TF count (90+ rows for a dense promoter), so a bottom-placed
+    track ends up hundreds of pixels from the signal it provides context for.
+
+    UTR and CDS are drawn at different heights, the usual thin/thick
+    convention, so coding extent is readable at a glance. Neighbouring genes
+    are kept and drawn muted -- a promoter sitting inside another gene is the
+    case a reader most needs to see, not one to filter away.
+    """
+    if gs is None or gs.empty:
+        return
+    lanes, seen = {}, []
+    for gene in gs.gene_name.fillna("").unique():
+        label = gene if gene else "(unnamed)"
+        if label not in lanes:
+            lanes[label] = len(lanes)
+            seen.append(label)
+    for gene, g in gs.groupby(gs.gene_name.fillna("")):
+        label = gene if gene else "(unnamed)"
+        lane = lanes[label]
+        focal = bool(focal_tx) and (g.transcript_id == focal_tx).any()
+        colour = PRIMARY if focal else REFERENCE
+        # thin backbone spanning the gene's extent in view
+        fig.add_trace(go.Scatter(
+            x=[g.local_start.min(), g.local_end.max()], y=[lane, lane],
+            mode="lines", line=dict(color=colour, width=1),
+            hoverinfo="skip", showlegend=False), row=row, col=1)
+        for _, f in g.iterrows():
+            thick = 0.34 if f.feature == "CDS" else 0.16
+            fig.add_trace(go.Scatter(
+                x=[f.local_start, f.local_end, f.local_end, f.local_start,
+                   f.local_start],
+                y=[lane - thick, lane - thick, lane + thick, lane + thick,
+                   lane - thick],
+                mode="lines", fill="toself", fillcolor=colour,
+                line=dict(width=0), opacity=0.95 if focal else 0.45,
+                hovertemplate=(f"<b>{label}</b> {f.feature}"
+                               + (f" {int(f.exon_number)}" if f.exon_number else "")
+                               + "<br>%{x:+,.0f} bp<extra></extra>"),
+                showlegend=False), row=row, col=1)
+    fig.update_yaxes(row=row, col=1, tickmode="array",
+                     tickvals=list(range(len(seen))), ticktext=seen,
+                     range=[-0.6, len(seen) - 0.4], showgrid=False)
+
+
 def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
                         tss_meta: dict,
                         score_range: tuple[int, int] = (500, 1000),
                         tf_filter: list[str] | None = None,
-                        compact: bool = False) -> go.Figure:
+                        compact: bool = False,
+                        gene_structure: pd.DataFrame | None = None) -> go.Figure:
     """
     Aligned view for a single TSS:
        (1) per-TSS smoothed KDE density
@@ -492,16 +541,30 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
 
     # Subplot row heights: density 1, rugs rug_h, all-modules 0.5,
     # then n_prog rows of 0.32 each
-    row_heights = [1.0, rug_h, 0.5] + [0.32] * n_prog
-    n_rows = 3 + n_prog
+    # Structure track sits between density and rug -- see _add_gene_structure.
+    n_lanes = (0 if gene_structure is None or gene_structure.empty
+               else gene_structure.gene_name.fillna("").nunique())
+    has_gs = n_lanes > 0
+    gs_h = max(0.3, 0.22 * n_lanes) if has_gs else 0.0
+    row_heights = ([1.0] + ([gs_h] if has_gs else []) + [rug_h, 0.5]
+                   + [0.32] * n_prog)
+    n_rows = 3 + n_prog + (1 if has_gs else 0)
+    # Row indices derived from the same flag as row_heights. They were literals
+    # (row=2 rug, row=3 modules), which silently shifts by one the moment a
+    # track is inserted above them.
+    row_gs = 2 if has_gs else None
+    row_rug = 3 if has_gs else 2
+    row_mod = row_rug + 1
 
     rug_title = (f"TFs binding at score ∈ [{smin}, {smax}] (n={n_tfs})"
                   if smin > 0 or smax < 1000 else
                   f"TFs binding (n={n_tfs})")
     if tf_filter and n_tfs_total != n_tfs:
         rug_title += f" — filtered from {n_tfs_total}"
-    titles = ["KDE density (per-TF mass=1)",
-              rug_title,
+    titles = ["KDE density (per-TF mass=1)"]
+    if has_gs:
+        titles.append("protein-coding structure (thick = CDS, thin = UTR)")
+    titles += [rug_title,
               "all modules — colored by k=10 dominant program"]
     titles += [f"P{p} only — {prog_reading.get(p, '')}" for p in program_rows]
 
@@ -532,6 +595,10 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
             fillcolor=fillcolor,
             opacity=0.18, line_width=0, layer="below", row=1, col=1,
         )
+
+    if has_gs:
+        _add_gene_structure(fig, gene_structure, row_gs,
+                            focal_tx=str(tss_meta.get("transcript_id", "")))
 
     # (2) TF rug rows — TF identity = color, one solid hue per row.
     # We attempted score-as-opacity and score-as-marker-size, but both
@@ -578,13 +645,13 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
                 hovertemplate="<b>%{text}</b><br>bp: %{x}<br>"
                               "score: %{customdata}<extra></extra>",
                 showlegend=False,
-            ), row=2, col=1)
+            ), row=row_rug, col=1)
         rug_label_size = 12 if n_tfs <= 12 else (10 if n_tfs <= 40 else 8)
         fig.update_yaxes(
             tickvals=list(range(len(tf_order))),
             ticktext=tf_order,
             range=[-0.6, len(tf_order) - 0.4],
-            row=2, col=1, automargin=True,
+            row=row_rug, col=1, automargin=True,
             tickmode="array", tickfont=dict(size=rug_label_size),
             showgrid=True, gridcolor="rgba(0,0,0,0.14)", gridwidth=1,
             zeroline=False,
@@ -596,10 +663,10 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
                 fig.add_hrect(y0=i - 0.5, y1=i + 0.5,
                                fillcolor="rgba(0,0,0,0.035)",
                                line_width=0, layer="below",
-                               row=2, col=1)
+                               row=row_rug, col=1)
 
     # (3) All modules ribbon (overview)
-    _add_module_blocks(fig, modules_df, row=3)
+    _add_module_blocks(fig, modules_df, row=row_mod)
 
     # (4..) Per-program rows
     for i, p in enumerate(program_rows):
@@ -617,7 +684,7 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
     fig.update_xaxes(title_text="bp from TSS (txn-oriented)",
                       row=n_rows, col=1)
     fig.update_yaxes(title_text="density", row=1, col=1, showgrid=False)
-    fig.update_yaxes(title_text="all", row=3, col=1,
+    fig.update_yaxes(title_text="all", row=row_mod, col=1,
                       visible=True, range=[-1, 1],
                       showticklabels=False, showgrid=False, title_standoff=4)
     fig.add_vline(x=0, line_dash="dash", line_color="red", line_width=1,

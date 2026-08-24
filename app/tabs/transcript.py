@@ -212,9 +212,12 @@ def render() -> None:
                      "density and module rows are unaffected.",
             )
 
+        gs = db.get_gene_structure(str(tss_meta["chrom"]), int(tss_meta["tss"]),
+                                   str(tss_meta["strand"]))
         fig = plotting.fig_transcript_view(peaks_df, modules_df, tss_meta,
                                             score_range=score_range,
-                                            tf_filter=tf_filter or None)
+                                            tf_filter=tf_filter or None,
+                                            gene_structure=gs)
         st.plotly_chart(fig, width="stretch", theme=None)
 
     # ----- Beyond the promoter window --------------------------------------

@@ -1495,3 +1495,40 @@ def get_module_annotation(transcript_id: str) -> pd.DataFrame:
         WHERE m.transcript_id = ?
         ORDER BY m.center_offset
         """, [transcript_id]).df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_gene_structure(chrom: str, tss: int, strand: str,
+                       half: int = 1500) -> pd.DataFrame:
+    """Protein-coding exon models in the window, as offsets from the TSS.
+
+    Returns local_start/local_end already flipped for strand, so downstream
+    positions are positive on both strands and the track lines up with the
+    peaks and modules drawn on the same axis.
+
+    Neighbouring genes are NOT filtered out. A promoter frequently sits inside
+    or beside another gene, and that is the case a reader most needs to see --
+    bidirectional promoters, nested genes, readthrough. `is_focal` marks which
+    features belong to the transcript being viewed so the caller can style
+    them differently rather than drop the rest.
+    """
+    fn = DATA_DIR / "gene_structure.parquet"
+    if not fn.exists():
+        return pd.DataFrame()
+    lo, hi = tss - half, tss + half
+    df = get_con().execute(
+        """SELECT chrom, start, "end", strand, feature, gene_name,
+                  transcript_id, exon_number
+           FROM read_parquet(?)
+           WHERE chrom = ? AND "end" >= ? AND start <= ?
+           ORDER BY start""",
+        [str(fn), str(chrom), lo, hi]).df()
+    if df.empty:
+        return df
+    if strand == "-":
+        df["local_start"] = tss - df["end"]
+        df["local_end"] = tss - df["start"]
+    else:
+        df["local_start"] = df["start"] - tss
+        df["local_end"] = df["end"] - tss
+    return df
