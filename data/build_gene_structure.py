@@ -103,16 +103,28 @@ def main() -> int:
             a = dict(_ATTR.findall(f[8]))
             if a.get("gene_biotype") != "protein_coding":
                 continue
+            # gene_id, because 1.3% of features have no gene_name at all --
+            # Ensembl novel genes like ENSG00000285171, which overlaps IL2RG's
+            # promoter. Labelling those "(unnamed)" told a reader nothing and
+            # looked like a bug; the accession is at least lookupable.
+            # transcript_biotype, because gene_biotype protein_coding admits
+            # nonsense_mediated_decay transcripts, and drawing those as if
+            # they were coding overstates them.
             rows.append((f[0], start, end, f[6], f[2],
-                         a.get("gene_name", ""), a.get("transcript_id", ""),
+                         a.get("gene_name", ""), a.get("gene_id", ""),
+                         a.get("transcript_id", ""),
+                         a.get("transcript_biotype", ""),
                          int(a.get("exon_number", 0) or 0)))
             kept += 1
             if kept % 200000 == 0:
                 _log(f"  kept {kept:,} of {seen:,} scanned")
 
     df = pd.DataFrame(rows, columns=["chrom", "start", "end", "strand",
-                                     "feature", "gene_name", "transcript_id",
+                                     "feature", "gene_name", "gene_id",
+                                     "transcript_id", "transcript_biotype",
                                      "exon_number"])
+    # one display label per gene, never blank
+    df["label"] = df.gene_name.where(df.gene_name.astype(bool), df.gene_id)
     df = df.sort_values(["chrom", "start"]).reset_index(drop=True)
     df.to_parquet(OUT_FN, index=False, compression="zstd")
     _log(f"{len(df):,} features from {seen:,} scanned "

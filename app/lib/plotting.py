@@ -444,16 +444,27 @@ def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "") -> 
     """
     if gs is None or gs.empty:
         return
-    lanes, seen = {}, []
-    for gene in gs.gene_name.fillna("").unique():
-        label = gene if gene else "(unnamed)"
+    # One lane per TRANSCRIPT. A merged gene model hides alternative first
+    # exons, which is the structure a promoter view exists to show.
+    key = gs["transcript_id"].fillna("")
+    order = [t for t in key.unique() if t]
+    # focal transcript first, so it reads at the top of the track
+    if focal_tx in order:
+        order = [focal_tx] + [t for t in order if t != focal_tx]
+    # TP53 has 17 coding transcripts in a 3 kb window; drawing them all makes
+    # the track a third of the figure and none of them legible. The focal one
+    # is always kept, and the overflow is stated rather than silently dropped.
+    n_total = len(order)
+    order = order[:MAX_STRUCTURE_LANES]
+    lanes = {t: i for i, t in enumerate(order)}
+    seen = [(t + ("  ←" if t == focal_tx else "")) for t in order]
+    if n_total > len(order):
+        seen[-1] += f"  (+{n_total - len(order)} more)"
+    for label, g in gs.groupby(key):
         if label not in lanes:
-            lanes[label] = len(lanes)
-            seen.append(label)
-    for gene, g in gs.groupby(gs.gene_name.fillna("")):
-        label = gene if gene else "(unnamed)"
+            continue
         lane = lanes[label]
-        focal = bool(focal_tx) and (g.transcript_id == focal_tx).any()
+        focal = label == focal_tx
         colour = PRIMARY if focal else REFERENCE
         # thin backbone spanning the gene's extent in view
         fig.add_trace(go.Scatter(
@@ -461,15 +472,22 @@ def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "") -> 
             mode="lines", line=dict(color=colour, width=1),
             hoverinfo="skip", showlegend=False), row=row, col=1)
         for _, f in g.iterrows():
+            # NMD transcripts pass the protein_coding GENE filter but are not
+            # translated -- drawn hollow so they are not read as coding.
+            nmd = str(f.get("transcript_biotype", "")) == "nonsense_mediated_decay"
             thick = 0.34 if f.feature == "CDS" else 0.16
             fig.add_trace(go.Scatter(
                 x=[f.local_start, f.local_end, f.local_end, f.local_start,
                    f.local_start],
                 y=[lane - thick, lane - thick, lane + thick, lane + thick,
                    lane - thick],
-                mode="lines", fill="toself", fillcolor=colour,
-                line=dict(width=0), opacity=0.95 if focal else 0.45,
+                mode="lines",
+                fill="none" if nmd else "toself",
+                fillcolor=None if nmd else colour,
+                line=dict(width=1.2 if nmd else 0, color=colour),
+                opacity=0.95 if focal else 0.45,
                 hovertemplate=(f"<b>{label}</b> {f.feature}"
+                               + (" · NMD" if nmd else "")
                                + (f" {int(f.exon_number)}" if f.exon_number else "")
                                + "<br>%{x:+,.0f} bp<extra></extra>"),
                 showlegend=False), row=row, col=1)
@@ -542,8 +560,11 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
     # Subplot row heights: density 1, rugs rug_h, all-modules 0.5,
     # then n_prog rows of 0.32 each
     # Structure track sits between density and rug -- see _add_gene_structure.
+    # Lanes are TRANSCRIPTS now, not genes. Counting genes here while the
+    # track drew transcripts would size the row for one lane and render 17.
     n_lanes = (0 if gene_structure is None or gene_structure.empty
-               else gene_structure.gene_name.fillna("").nunique())
+               else min(gene_structure.transcript_id.nunique(),
+                        MAX_STRUCTURE_LANES))
     has_gs = n_lanes > 0
     gs_h = max(0.3, 0.22 * n_lanes) if has_gs else 0.0
     row_heights = ([1.0] + ([gs_h] if has_gs else []) + [rug_h, 0.5]
@@ -681,6 +702,12 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
         )
 
     fig.update_xaxes(range=[-OUTER_HALF, OUTER_HALF])
+    # Vertical zoom is meaningless here and actively harmful: every row is a
+    # fixed lane -- one per TF, one per gene, one per module -- so Plotly's
+    # zoom-out button, which scales BOTH axes, squeezed the TF rug into a
+    # fraction of its height and made the rows unreadable. Position along the
+    # x-axis is the only dimension worth zooming.
+    fig.update_yaxes(fixedrange=True)
     fig.update_xaxes(title_text="bp from TSS (txn-oriented)",
                       row=n_rows, col=1)
     fig.update_yaxes(title_text="density", row=1, col=1, showgrid=False)
@@ -1160,6 +1187,9 @@ def fig_tf_program_loadings(loadings_df: pd.DataFrame, tf: str) -> go.Figure:
 # 28 families need more than the 10-colour PROGRAM_COLORS palette above, which
 # would silently recycle hues and imply two families are the same one.
 FAMILY_COLORS = (pc.qualitative.Dark24 + pc.qualitative.Light24)
+
+# Transcript lanes drawn in the structure track before overflow is summarised.
+MAX_STRUCTURE_LANES = 8
 
 
 def gene_zoom_levels(dist, promoter_half: int = OUTER_HALF,

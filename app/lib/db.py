@@ -1499,30 +1499,42 @@ def get_module_annotation(transcript_id: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
 def get_gene_structure(chrom: str, tss: int, strand: str,
-                       half: int = 1500) -> pd.DataFrame:
+                       half: int = 1500, gene_name: str | None = None,
+                       coding_only: bool = True) -> pd.DataFrame:
     """Protein-coding exon models in the window, as offsets from the TSS.
 
     Returns local_start/local_end already flipped for strand, so downstream
     positions are positive on both strands and the track lines up with the
     peaks and modules drawn on the same axis.
 
-    Neighbouring genes are NOT filtered out. A promoter frequently sits inside
-    or beside another gene, and that is the case a reader most needs to see --
-    bidirectional promoters, nested genes, readthrough. `is_focal` marks which
-    features belong to the transcript being viewed so the caller can style
-    them differently rather than drop the rest.
+    Restricted to `gene_name` when given. Showing every overlapping gene was
+    the first cut and it obscured the thing this view is for: IL2RG's window
+    also contains ENSG00000285171, whose models sprawl past both edges and
+    swamp the gene actually being viewed.
+
+    Rows are per TRANSCRIPT, not merged into one gene model. Collapsing them
+    hides alternative first exons, which is precisely the structure a promoter
+    view should show.
+
+    `coding_only` keeps transcripts whose own biotype is protein_coding. The
+    GENE-level biotype admits nonsense_mediated_decay transcripts -- 45 of the
+    features in IL2RG's window are NMD -- and drawing those beside real coding
+    models overstates them.
     """
     fn = DATA_DIR / "gene_structure.parquet"
     if not fn.exists():
         return pd.DataFrame()
     lo, hi = tss - half, tss + half
     df = get_con().execute(
-        """SELECT chrom, start, "end", strand, feature, gene_name,
-                  transcript_id, exon_number
+        """SELECT chrom, start, "end", strand, feature, gene_name, gene_id,
+                  label, transcript_id, transcript_biotype, exon_number
            FROM read_parquet(?)
            WHERE chrom = ? AND "end" >= ? AND start <= ?
-           ORDER BY start""",
-        [str(fn), str(chrom), lo, hi]).df()
+             AND (? IS NULL OR gene_name = ? OR gene_id = ?)
+             AND (NOT ? OR transcript_biotype = 'protein_coding')
+           ORDER BY transcript_id, start""",
+        [str(fn), str(chrom), lo, hi, gene_name, gene_name, gene_name,
+         bool(coding_only)]).df()
     if df.empty:
         return df
     if strand == "-":

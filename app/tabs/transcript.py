@@ -213,7 +213,8 @@ def render() -> None:
             )
 
         gs = db.get_gene_structure(str(tss_meta["chrom"]), int(tss_meta["tss"]),
-                                   str(tss_meta["strand"]))
+                                   str(tss_meta["strand"]),
+                                   gene_name=str(tss_meta.get("gene_name") or ""))
         fig = plotting.fig_transcript_view(peaks_df, modules_df, tss_meta,
                                             score_range=score_range,
                                             tf_filter=tf_filter or None,
