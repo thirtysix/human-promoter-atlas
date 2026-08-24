@@ -748,8 +748,12 @@ def write_manifest(canonical_A: int = 0, counts: dict | None = None):
     be prose constants in the tab source, and they drifted: the text still said
     1,304 TFs and score >= 500 after the assignment threshold was recalibrated.
     """
+    # Only consult canonical_A.txt when archetypes were actually loaded. The
+    # file survives from earlier runs, so the fallback reported a_canonical=4
+    # for a build with no archetype tables at all -- the Methods tab would have
+    # described a layer the app does not serve.
     canA_path = ARCHETYPE_DN / "canonical_A.txt"
-    if canonical_A == 0 and canA_path.exists():
+    if canonical_A == 0 and canA_path.exists() and _promoter_programs_available():
         canonical_A = int(canA_path.read_text().strip())
     stamp = read_build_stamp()
     counts = counts or {}
@@ -768,7 +772,10 @@ def write_manifest(canonical_A: int = 0, counts: dict | None = None):
             "n_tf": counts.get("tf"),
             "n_tss": counts.get("tss"),
             "n_modules": counts.get("modules"),
-            "n_programs": counts.get("programs"),
+            # None when the promoter factorization was not built. The programs
+            # the site serves in that case come from the genome layer, and
+            # build_app_db_genome.py merges them in -- see the "genome" block.
+            "n_promoter_programs": counts.get("programs"),
         },
         "datasets": {
             "ensembl": "GRCh38.114",

@@ -312,8 +312,52 @@ def main() -> int:
     ).fetchone()[0]
     print(f"\n  sample gene-page query (SOX2), {len(ex)} of {total} elements:")
     print(ex.to_string(index=False))
+    _write_genome_manifest(con, root, args.k, Path(args.db))
     con.close()
     return 0
+
+
+def _write_genome_manifest(con, root: Path, k: int, db_path: Path):
+    """Merge the genome layer into manifest.json.
+
+    The Methods tab reads the manifest. Without this it described a build with
+    no programs at all -- build_app_db.py counts only its own tables, so it
+    recorded n_programs None while the app served 140 of them, and the promoter
+    valid_chroms still listed Y and MT which genome discovery excludes.
+    """
+    import json
+    mf = db_path.parent / "manifest.json"
+    if not mf.exists():
+        _log(f"  no {mf.name}; skipping manifest merge")
+        return
+    m = json.loads(mf.read_text())
+    q = lambda s: con.execute(s).fetchone()[0]
+    m["genome"] = {
+        "k": k,
+        "n_elements": q("SELECT COUNT(*) FROM elements"),
+        "n_programs": q("SELECT COUNT(*) FROM genome_programs"),
+        "n_programs_substantive":
+            q("SELECT COUNT(*) FROM genome_programs WHERE substantive"),
+        "n_families": q("SELECT COUNT(*) FROM program_families"),
+        "n_families_named":
+            q("SELECT COUNT(*) FROM program_families WHERE named")
+            if con.execute("SELECT COUNT(*) FROM information_schema.columns "
+                           "WHERE table_name='program_families' AND "
+                           "column_name='named'").fetchone()[0] else None,
+        "strata": {s: n for s, n in con.execute(
+            "SELECT stratum, COUNT(*) FROM elements GROUP BY 1").fetchall()},
+        "min_support": 11,
+        "min_support_basis": "circular-shift null, 5% FDR genome-wide",
+        "valid_chroms": ["1-22", "X"],
+        "excluded_chroms": ["Y", "MT"],
+        "source": str(root),
+    }
+    m.setdefault("counts", {})["n_programs_served"] = m["genome"]["n_programs"]
+    mf.write_text(json.dumps(m, indent=2))
+    g = m["genome"]
+    _log(f"  manifest: genome layer recorded (k={g['k']}, "
+         f"{g['n_elements']:,} elements, {g['n_programs']} programs, "
+         f"{g['n_families']} families)")
 
 
 if __name__ == "__main__":
