@@ -83,10 +83,10 @@ def render() -> None:
                   help="Peaks across all chip-atlas experiments aggregated "
                        "for this TF that fall on standard chromosomes after "
                        "25-nt recentering.")
-        c2.metric("Bound TSSs (score≥500, ±100 bp core)",
+        c2.metric(f"Bound TSSs (score≥{db.min_score_assign()}, ±100 bp core)",
                   f"{int(meta.get('n_bound_tss_core') or 0):,}",
                   help="Number of canonical TSSs this TF binds at the core "
-                       "promoter (±100 bp) with at least one score≥500 peak.")
+                       f"promoter (±100 bp) with at least one score≥{db.min_score_assign()} peak.")
         c3.metric("Cluster (filtered K=8)",
                   f"C{int(meta['cluster_filtered'])}"
                   if meta.get("cluster_filtered") is not None
@@ -124,7 +124,7 @@ def render() -> None:
                     disabled=not show_cluster_mean,
                     help="Which hierarchical TF-shape clustering to draw "
                          "the cluster mean from. **filtered K=8** uses "
-                         "only score≥500 peaks (8 clusters), "
+                         f"only score≥{db.min_score_assign()} peaks (8 clusters), "
                          "**no_filter K=12** uses all peaks (12 finer "
                          "clusters).",
                 ) if show_cluster_mean else "filtered K=8"
@@ -327,7 +327,7 @@ def render() -> None:
                                 "to show.")
         top = db.get_top_tss_for_tf(tf, limit=n_top)
         if top.empty:
-            st.info("No score≥500 peaks for this TF in the canonical-TSS "
+            st.info(f"No score≥{db.min_score_assign()} peaks for this TF in the canonical-TSS "
                     "windows.")
         else:
             st.dataframe(
@@ -339,8 +339,8 @@ def render() -> None:
                     "gene_name": st.column_config.TextColumn(
                         "gene",
                         help="Gene symbol of that transcript."),
-                    "n_peaks_500": st.column_config.NumberColumn(
-                        "# peaks (score≥500)",
+                    "n_peaks_assigned": st.column_config.NumberColumn(
+                        "# peaks (assigned)",
                         help="Number of recentered 25-nt peaks for this "
                              "TF at this TSS, score ≥ 500."),
                     "min_offset":  st.column_config.NumberColumn(

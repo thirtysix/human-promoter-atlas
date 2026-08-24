@@ -70,6 +70,36 @@ def build_facts() -> dict:
     }
 
 
+def peaks_source() -> str:
+    """SQL fragment naming the peaks source, sidecar or table.
+
+    Peaks moved out of the database into data/peaks.parquet because at the
+    q1e-5 tier they are 73.9 M rows and 94% of it, which does not fit the
+    production container's 2 GiB cap. Two queries kept saying FROM peaks after
+    that move and raised Catalog Error at runtime -- they were only reachable
+    with a TF selected, so a default-state render never touched them. Every
+    peaks query now asks here instead of naming the source itself.
+    """
+    fn = DATA_DIR / "peaks.parquet"
+    return f"read_parquet('{fn}')" if fn.exists() else "peaks"
+
+
+def min_score_assign(default: int = 250) -> int:
+    """The assignment threshold this build actually used.
+
+    Hardcoding it was the standing bug: 16 sites said 500 while the build
+    assigned at 250, so the modules table labelled its TF counts "(>=500)"
+    when they were ">=250", and four panels FILTERED at 500 and therefore
+    disagreed with the table above them. build_facts() has read this from the
+    manifest since the last recalibration; these callers never adopted it.
+    """
+    v = build_facts().get("min_score_assign")
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def fmt_count(n: int | None, unknown: str = "?") -> str:
     """Thousands-separated, or a placeholder when the manifest lacks the key."""
     return f"{n:,}" if isinstance(n, int) else unknown
@@ -168,9 +198,9 @@ def get_peaks_for_tss(tss_id: int, min_score: int = 0) -> pd.DataFrame:
             [str(fn), tss_id, min_score],
         ).df()
     return get_con().execute(
-        """
+        f"""
         SELECT t.tf, p.tf_idx, p.local_offset, p.score
-        FROM peaks p
+        FROM {peaks_source()} p
         JOIN tf t USING (tf_idx)
         WHERE p.tss_id = ? AND p.score >= ?
         ORDER BY t.tf, p.local_offset
@@ -443,22 +473,22 @@ def get_tf_program_loadings(tf: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_top_tss_for_tf(tf: str, limit: int = 100) -> pd.DataFrame:
-    """TSSs with the most score≥500 peaks for this TF."""
+    """TSSs with the most assigned-score peaks for this TF."""
     return get_con().execute(
-        """
+        f"""
         SELECT t.gene_name, t.transcript_id, t.chrom, t.tss, t.strand,
-               COUNT(*) AS n_peaks_500,
+               COUNT(*) AS n_peaks_assigned,
                MIN(p.local_offset) AS min_offset,
                MAX(p.local_offset) AS max_offset
-        FROM peaks p
+        FROM {peaks_source()} p
         JOIN tf  ON p.tf_idx = tf.tf_idx
         JOIN tss t ON p.tss_id = t.tss_id
-        WHERE tf.tf = ? AND p.score >= 500
+        WHERE tf.tf = ? AND p.score >= ?
         GROUP BY t.gene_name, t.transcript_id, t.chrom, t.tss, t.strand
-        ORDER BY n_peaks_500 DESC
+        ORDER BY n_peaks_assigned DESC
         LIMIT ?
         """,
-        [tf, limit],
+        [tf, min_score_assign(), limit],
     ).df()
 
 

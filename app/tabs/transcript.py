@@ -23,7 +23,7 @@ HELP_SCORE_RANGE = (
 HELP_MODULES_TABLE = (
     "Each row is one detected regulatory module — a local concentration of "
     "TF binding within ±1.5 kb of the TSS. `weight` is the dominant program's "
-    "share of the module's NMF mixture (0–1). `n_TFs (≥500)` is the number "
+    "share of the module's NMF mixture (0–1). `n_TFs (≥assigned score)` is the number "
     "of distinct TFs with at least one high-confidence peak in this module."
 )
 HELP_PROG_CARDS = (
@@ -256,7 +256,8 @@ def render() -> None:
                 help="**Top panel:** per-tissue mean TPM (with IQR error "
                      "bars) for this transcript across GTEx V11. **Bottom "
                      "panel:** for each module at this promoter, the mean "
-                     "TPM of its assigned TFs (score≥500 inside the module) "
+                     "TPM of its assigned TFs (at the build's assignment score, "
+                     "inside the module) "
                      "per tissue. Both panels share the same tissue order — "
                      "hot cells under tall bars = a tissue where both the "
                      "transcript itself and a module's TFs are highly "
@@ -331,7 +332,7 @@ def render() -> None:
                 # Annotate which TFs actually bind this gene
                 bound_tfs = set()
                 if not peaks_df.empty:
-                    bound_tfs = set(peaks_df[peaks_df["score"] >= 500]
+                    bound_tfs = set(peaks_df[peaks_df["score"] >= db.min_score_assign()]
                                      ["tf"].dropna().unique())
                 corrs["binds_promoter"] = corrs["tf"].isin(bound_tfs)
                 st.dataframe(
@@ -348,7 +349,7 @@ def render() -> None:
                                  "the 66 GTEx tissues. + = co-expressed, "
                                  "− = anti-correlated."),
                         "binds_promoter": st.column_config.CheckboxColumn(
-                            "binds promoter (score≥500)",
+                            "binds promoter (assigned)",
                             help="True if this TF has at least one peak "
                                  "in the focal TSS's ±1.5 kb window with "
                                  "score ≥ 500. A binding-AND-correlation "
@@ -406,8 +407,8 @@ def render() -> None:
             # Add DepMap essentiality of the assigned TFs per module.
             if db.depmap_available() and not peaks_df.empty:
                 # For each module, compute median + best-TF Chronos across
-                # the TFs that have score>=500 peaks within [lo, hi].
-                hp = peaks_df[peaks_df["score"] >= 500]
+                # the TFs the build actually assigned, within [lo, hi].
+                hp = peaks_df[peaks_df["score"] >= db.min_score_assign()]
                 # Index peaks once
                 peaks_local = hp[["local_offset", "tf"]].dropna()
                 tf_chronos_rows = []
@@ -486,7 +487,7 @@ def render() -> None:
                         help="# distinct TFs with at least one peak "
                              "(any chip-atlas score) in this module."),
                     "n_tfs_assigned":   st.column_config.NumberColumn(
-                        "TFs (≥500)", width="small",
+                        f"TFs (≥{db.min_score_assign()})", width="small",
                         help="# distinct TFs with at least one core "
                              "score ≥ 500 peak in this module — the strict "
                              "TF assignment used downstream."),
@@ -538,7 +539,7 @@ def render() -> None:
                     "tf_median_chronos":  st.column_config.NumberColumn(
                         "med. Chronos", format="%.2f", width="small",
                         help="Median DepMap Chronos across the module's "
-                             "score≥500 TFs. < −1 = essential."),
+                             "assigned-score TFs. < −1 = essential."),
                     "tf_best_essential":  st.column_config.TextColumn(
                         "best TF", width="small",
                         help="TF in this module with the most-negative "
@@ -615,11 +616,11 @@ def render() -> None:
             )
             target_gene = tss_meta["gene_name"]
             bound_tfs = tuple(sorted(set(
-                peaks_df.loc[peaks_df["score"] >= 500, "tf"]
+                peaks_df.loc[peaks_df["score"] >= db.min_score_assign(), "tf"]
                         .dropna().astype(str)
             )))
             if not bound_tfs:
-                st.info("No score≥500 TFs in this TSS's window.")
+                st.info("No assigned-score TFs in this TSS's window.")
             else:
                 with st.spinner("Computing TF×target correlations…"):
                     corr_df = db.depmap_tf_target_correlation(
