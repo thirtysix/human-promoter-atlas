@@ -217,6 +217,7 @@ def render() -> None:
     # compress the promoter region to a few pixels, so the wider neighbourhood
     # gets its own zoom hierarchy, with the promoter box marked at every level
     # so the relationship stays legible.
+    _render_module_composition(modules_df, peaks_df)
     _render_neighbourhood(tss_meta)
 
     # ----- Programs present (clickable cards) -------------------------------
@@ -889,3 +890,63 @@ def _module_label(merged, mid) -> str:
     if pd.notna(r.get("r_module_target")):
         parts.append(f"r={r['r_module_target']:.2f}")
     return f"{parts[0]}  ({' · '.join(parts[1:])})"
+
+
+def _render_module_composition(modules_df, peaks_df) -> None:
+    """Which TFs make up each module, straight from the peaks.
+
+    The modules table alone is sparse -- widths, counts and a scatter of NULL
+    program columns. The detail that answers "what IS this module" used to sit
+    only inside the GTEx driver expander, which is gated on
+    module_target_correlation.parquet; that file is not built for every tier,
+    so on a build without it the whole thing disappears and the module becomes
+    an unexplained row.
+
+    Composition needs no GTEx at all. A module is the TFs with peaks inside its
+    [lo_offset, hi_offset] window, and peaks are already loaded for the profile
+    above. Correlation drivers are a separate, richer question that does need
+    the parquet -- this is the part that should always be available.
+    """
+    if modules_df.empty or peaks_df.empty:
+        return
+    thr = db.min_score_assign()
+    with st.container(border=True):
+        st.markdown(
+            "### What's in each module",
+            help=f"TFs with a peak inside the module's window. `assigned` "
+                 f"marks those at score ≥ {thr}, the threshold this build used "
+                 f"to assign a TF to a module -- the rest bind but did not "
+                 f"clear it. Positions are bp from the TSS.",
+        )
+        labels = {
+            int(r.module_id): (f"M{int(r.module_id)}  ({int(r.center_offset):+d} bp"
+                               f" · {int(r.n_tfs_assigned)} assigned"
+                               f" · {int(r.width)} bp wide)")
+            for _, r in modules_df.iterrows()}
+        mid = st.selectbox("Module", options=list(labels),
+                           format_func=lambda m: labels[m],
+                           key="mod_comp_pick")
+        m = modules_df[modules_df.module_id == mid].iloc[0]
+        inside = peaks_df[(peaks_df.local_offset >= int(m.lo_offset))
+                          & (peaks_df.local_offset <= int(m.hi_offset))]
+        if inside.empty:
+            st.caption("No peaks inside this module's window.")
+            return
+        per_tf = (inside.groupby("tf")
+                  .agg(peaks=("score", "size"), best_score=("score", "max"),
+                       median_offset=("local_offset", "median"))
+                  .reset_index())
+        per_tf["assigned"] = per_tf.best_score >= thr
+        per_tf = per_tf.sort_values(["assigned", "best_score"],
+                                    ascending=[False, False])
+        n_asg = int(per_tf.assigned.sum())
+        st.caption(
+            f"M{int(mid)} spans {int(m.lo_offset):+d} to {int(m.hi_offset):+d} bp "
+            f"and contains {len(inside):,} peaks from {len(per_tf)} TFs — "
+            f"**{n_asg} assigned** at score ≥ {thr}, {len(per_tf) - n_asg} below it."
+        )
+        st.dataframe(
+            per_tf.rename(columns={"tf": "TF", "peaks": "# peaks",
+                                   "best_score": "best score",
+                                   "median_offset": "median bp"}),
+            hide_index=True, use_container_width=True)
