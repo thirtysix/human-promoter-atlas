@@ -740,8 +740,34 @@ def render() -> None:
                                  max_offset=("local_offset", "max"))
                             .reset_index()
                             .sort_values("n_peaks", ascending=False))
-            st.dataframe(tf_summary, hide_index=True,
-                          width="stretch")
+            st.dataframe(
+                tf_summary, hide_index=True, width="stretch",
+                column_config={
+                    "tf": st.column_config.TextColumn(
+                        "TF",
+                        help="Transcription factor, by ChIP-Atlas antigen "
+                             "name."),
+                    "n_peaks": st.column_config.NumberColumn(
+                        "# peaks", format="%d",
+                        help="Recentered 25-nt peak blocks for this TF in "
+                             "this window, within the score range above. One "
+                             "TF can have several peaks at one promoter."),
+                    "max_score": st.column_config.NumberColumn(
+                        "best score", format="%d",
+                        help="Highest ChIP-Atlas score among them. The score "
+                             "IS the q-value in another unit, so a higher "
+                             "number is stronger evidence of binding, not "
+                             "more binding."),
+                    "min_offset": st.column_config.NumberColumn(
+                        "earliest bp", format="%d",
+                        help="Most upstream peak position, in "
+                             "transcription-oriented bp from the TSS. "
+                             "Negative is 5′ of the TSS."),
+                    "max_offset": st.column_config.NumberColumn(
+                        "latest bp", format="%d",
+                        help="Most downstream peak position, same "
+                             "convention — positive is 3′ of the TSS."),
+                })
 
     # ----- Downloads --------------------------------------------------------
     with st.expander("Download this transcript's data", expanded=False):
@@ -784,7 +810,8 @@ def _render_program_card(program: int, reading: str, n_modules: int) -> None:
             ttf_disp = ttf.head(10).copy()
             ttf_disp["loading"] = ttf_disp["loading"].round(3)
             st.dataframe(ttf_disp[["rank", "tf", "loading"]],
-                          hide_index=True, width="stretch")
+                          hide_index=True, width="stretch",
+                          column_config=ui.PROGRAM_TF_COLUMNS)
 
         # Top GO terms
         go = db.get_program_top_go(program, limit=5)
@@ -803,8 +830,27 @@ def _render_program_card(program: int, reading: str, n_modules: int) -> None:
             st.dataframe(go_disp, hide_index=True,
                           width="stretch",
                           column_config={
-                              "set_size_in_bg": "term size",
-                              "fg_in": "fg",
+                              "term": st.column_config.TextColumn(
+                                  "term", width="medium",
+                                  help="GO biological-process term, GOBP_ "
+                                       "prefix stripped."),
+                              "fg_in": st.column_config.NumberColumn(
+                                  "fg", format="%d",
+                                  help="Genes of this program's promoters "
+                                       "that are in the term."),
+                              "set_size_in_bg": st.column_config.NumberColumn(
+                                  "term size", format="%d",
+                                  help="Genes in the term overall, within the "
+                                       "background. Read with `fg` — 4/12 and "
+                                       "4/900 are not the same evidence."),
+                              "odds_ratio": st.column_config.NumberColumn(
+                                  "odds", format="%.2f",
+                                  help="Odds ratio of the overlap against a "
+                                       "genome background."),
+                              "q_value": st.column_config.TextColumn(
+                                  "q",
+                                  help="Benjamini-Hochberg FDR. Only terms "
+                                       "under 0.05 are listed."),
                           })
 
         if st.button(f"Open P{program} in the Programs page",
@@ -953,7 +999,52 @@ def _render_module_composition(modules_df, peaks_df) -> None:
                     "n_tfs_assigned": "TFs", "program": "program",
                     "family_label": "family", "program_tfs": "program TFs",
                     "substantive": "substantive", "match_bp": "offset (bp)"}),
-                hide_index=True, use_container_width=True)
+                hide_index=True, use_container_width=True,
+                column_config={
+                    "module": st.column_config.NumberColumn(
+                        "module", format="%d",
+                        help="Module id in this build. Ids are not stable "
+                             "across builds."),
+                    "center (bp)": st.column_config.NumberColumn(
+                        "center (bp)", format="%d",
+                        help="Module midpoint in transcription-oriented bp "
+                             "from the TSS — negative is 5′, positive 3′."),
+                    "TFs": st.column_config.NumberColumn(
+                        "TFs", format="%d",
+                        help=f"Distinct TFs assigned to the module, i.e. with "
+                             f"a peak at score ≥ {thr} inside it."),
+                    "program": st.column_config.NumberColumn(
+                        "program", format="%d",
+                        help="Genome-wide program inherited from the element "
+                             "at the same locus. Blank means the module has "
+                             "no matching element — it sits below the genome "
+                             "support floor of 11 assigned TFs, which the "
+                             "promoter pipeline does not apply. A blank is a "
+                             "statement about evidence, not a failed lookup."),
+                    "family": st.column_config.TextColumn(
+                        "family", width="medium",
+                        help="The program's family label, from MSigDB "
+                             "enrichment with an FDR behind it."),
+                    "program TFs": st.column_config.TextColumn(
+                        "program TFs", width="large",
+                        help="Top-loading TFs of that program. These are the "
+                             "program's signature genome-wide, NOT the TFs "
+                             "found in this particular module — compare them "
+                             "against the per-module list below."),
+                    "substantive": st.column_config.CheckboxColumn(
+                        "substantive",
+                        help="Whether the inherited program has ≥100 elements "
+                             "and seed stability ≥0.90. An unticked box means "
+                             "the label rests on a program pinned to very few "
+                             "elements."),
+                    "offset (bp)": st.column_config.NumberColumn(
+                        "offset (bp)", format="%d",
+                        help="Distance between the module's center and the "
+                             "matched element's center. The regression gate "
+                             "recovered 98.2% of comparable modules at a "
+                             "12 bp median offset, so large values here are "
+                             "worth a second look."),
+                })
 
         labels = {
             int(r.module_id): (f"M{int(r.module_id)}  ({int(r.center_offset):+d} bp"
@@ -986,4 +1077,30 @@ def _render_module_composition(modules_df, peaks_df) -> None:
             per_tf.rename(columns={"tf": "TF", "peaks": "# peaks",
                                    "best_score": "best score",
                                    "median_offset": "median bp"}),
-            hide_index=True, use_container_width=True)
+            hide_index=True, use_container_width=True,
+            column_config={
+                "TF": st.column_config.TextColumn(
+                    "TF", help="Transcription factor with at least one peak "
+                               "inside this module's window."),
+                "# peaks": st.column_config.NumberColumn(
+                    "# peaks", format="%d",
+                    help="Recentered 25-nt peak blocks for this TF inside the "
+                         "module."),
+                "best score": st.column_config.NumberColumn(
+                    "best score", format="%d",
+                    help=f"Highest ChIP-Atlas score among them — this is what "
+                         f"the ≥ {thr} assignment test is applied to. The "
+                         f"score is the q-value in another unit, so it "
+                         f"measures confidence that the TF binds, not how "
+                         f"much of it binds."),
+                "median bp": st.column_config.NumberColumn(
+                    "median bp", format="%d",
+                    help="Median peak position in transcription-oriented bp "
+                         "from the TSS."),
+                "assigned": st.column_config.CheckboxColumn(
+                    "assigned",
+                    help=f"Whether this TF cleared score {thr} and therefore "
+                         f"counts toward the module's TF total. Unticked TFs "
+                         f"do bind here — they just did not clear the "
+                         f"threshold this build assigns at."),
+            })

@@ -75,7 +75,53 @@ def render() -> None:
                 "promoter_log2FE_matched": "promFEm",
                 "distal_log2FE_matched": "distFEm", "top_tfs": "top TFs"}
         show = show[[c for c in cols if c in show.columns]].rename(columns=cols)
-        st.dataframe(show, hide_index=True, use_container_width=True)
+        st.dataframe(
+            show, hide_index=True, use_container_width=True,
+            column_config={
+                "family": st.column_config.NumberColumn(
+                    "family", format="%d",
+                    help="Family number. Arbitrary — families are the "
+                         "clusters of the 140 programs, not a ranking."),
+                "label": st.column_config.TextColumn(
+                    "label", width="medium",
+                    help="Name from MSigDB enrichment over the family's TFs, "
+                         "chosen complex-first then by odds ratio, with an "
+                         "FDR behind it. Blank means no term cleared FDR — a "
+                         "fact about the family, not a gap: the KRAB-ZNF "
+                         "family shares neither a complex nor a process."),
+                "programs": st.column_config.NumberColumn(
+                    "programs", format="%d",
+                    help="How many of the 140 programs are in this family."),
+                "substantive": st.column_config.NumberColumn(
+                    "substantive", format="%d",
+                    help="Of those, how many have ≥100 elements AND seed "
+                         "stability ≥0.90. A family can be large and mostly "
+                         "insubstantial."),
+                "elements": st.column_config.NumberColumn(
+                    "elements", format="%d",
+                    help="Total elements across the family's programs."),
+                "stability": st.column_config.NumberColumn(
+                    "stability", format="%.3f",
+                    help="Median seed stability of the member programs."),
+                "promFEm": st.column_config.NumberColumn(
+                    "promFEm", format="%.2f",
+                    help="Complexity-matched log2 fold enrichment at "
+                         "promoters. Matched because distal elements carry "
+                         "fewer assigned TFs (median 21 vs 48), so a raw "
+                         "value would make any sparse-loading family look "
+                         "distal-specific."),
+                "distFEm": st.column_config.NumberColumn(
+                    "distFEm", format="%.2f",
+                    help="The same for distal elements — beyond ±1.5 kb, "
+                         "which is 353,550 of the 467,223 elements."),
+                "top TFs": st.column_config.TextColumn(
+                    "top TFs", width="large",
+                    help="Most-loaded TFs across the family's programs. "
+                         "Members are grouped by WHERE they act, not by "
+                         "shared subunits — PRC2 and PRC1.1 have a TF-loading "
+                         "cosine of 0.009 — so this list can look "
+                         "heterogeneous and still be one family."),
+            })
 
     # ---- family detail ----------------------------------------------------
     labels = {int(r.family): (f"{int(r.family)} — {r.label}"
@@ -116,8 +162,49 @@ def render() -> None:
             t = terms.rename(columns={
                 "is_label": "headline", "label": "term", "overlap": "hits",
                 "set_size": "term size", "overlap_tfs": "overlap TFs"})
-            st.dataframe(t.drop(columns=["url"], errors="ignore"),
-                         hide_index=True, use_container_width=True)
+            st.dataframe(
+                t.drop(columns=["url"], errors="ignore"),
+                hide_index=True, use_container_width=True,
+                column_config={
+                    "rank": st.column_config.NumberColumn(
+                        "rank", format="%d",
+                        help="Position by q among this family's enriched "
+                             "terms."),
+                    "headline": st.column_config.CheckboxColumn(
+                        "headline",
+                        help="The row the family's displayed label came from. "
+                             "It is usually NOT rank 1 (median rank 4): the "
+                             "label is chosen complex-first then by odds "
+                             "ratio, while this list ranks by q."),
+                    "term": st.column_config.TextColumn(
+                        "term", width="medium",
+                        help="MSigDB term name."),
+                    "lib": st.column_config.TextColumn(
+                        "lib",
+                        help="CC = cellular component (complexes), "
+                             "BP = biological process."),
+                    "go_id": st.column_config.TextColumn(
+                        "GO id", help="Gene Ontology accession."),
+                    "hits": st.column_config.NumberColumn(
+                        "hits", format="%d",
+                        help="Family TFs that are in the term."),
+                    "term size": st.column_config.NumberColumn(
+                        "term size", format="%d",
+                        help="TFs in the term overall. Read with `hits` — "
+                             "3/5 and 3/400 are very different evidence."),
+                    "odds": st.column_config.NumberColumn(
+                        "odds", format="%.2f",
+                        help="Odds ratio of the overlap."),
+                    "q": st.column_config.NumberColumn(
+                        "q", format="%.1e",
+                        help="Benjamini-Hochberg FDR. Every term shown "
+                             "cleared 0.05."),
+                    "overlap TFs": st.column_config.TextColumn(
+                        "overlap TFs", width="large",
+                        help="Which family members are in the term. This is "
+                             "the evidence — it lets you judge a 3/7 hit "
+                             "rather than take the name on trust."),
+                })
 
     with tab_prog:
         progs = db.get_genome_programs(family=pick)
@@ -126,7 +213,8 @@ def render() -> None:
                                "substantive", "promoter_log2FE_matched",
                                "distal_log2FE_matched", "top_tfs")
                    if c in progs.columns]],
-            hide_index=True, use_container_width=True)
+            hide_index=True, use_container_width=True,
+            column_config=ui.PROGRAM_COLUMNS)
 
     with tab_genes:
         st.markdown(
@@ -137,5 +225,31 @@ def render() -> None:
                  "PRC2 family that gave SRGAP2C with 217 elements, 99% of them "
                  "distal. This is a lookup, not an assignment: gene identity "
                  "does not predict an element's program.")
-        st.dataframe(db.get_genes_in_family(pick, limit=100),
-                     hide_index=True, use_container_width=True)
+        st.dataframe(
+            db.get_genes_in_family(pick, limit=100),
+            hide_index=True, use_container_width=True,
+            column_config={
+                "gene_name": st.column_config.TextColumn(
+                    "gene", help="Gene symbol. This is a LOOKUP, not an "
+                                 "assignment — gene identity does not predict "
+                                 "an element's program once distance is "
+                                 "controlled."),
+                "n_promoter": st.column_config.NumberColumn(
+                    "promoter", format="%d",
+                    help="Elements of this family within ±1.5 kb of the "
+                         "gene's TSS. The ranking uses this column."),
+                "n_distal": st.column_config.NumberColumn(
+                    "distal", format="%d",
+                    help="Elements of this family beyond the proximal window. "
+                         "Ranking on distal counts returns segmental "
+                         "duplications and repeat clusters, which accumulate "
+                         "spurious peaks — SRGAP2C tops the PRC2 family with "
+                         "217 elements, 99% of them distal."),
+                "n_elements": st.column_config.NumberColumn(
+                    "total", format="%d",
+                    help="All of this family's elements nearest this gene."),
+                "promoter_weight": st.column_config.NumberColumn(
+                    "prom. weight", format="%.3f",
+                    help="Summed NMF loading of the promoter-stratum "
+                         "elements — the tie-break after the promoter count."),
+            })

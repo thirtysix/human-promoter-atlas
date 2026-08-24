@@ -69,7 +69,8 @@ def render() -> None:
                             "substantive", "promoter_log2FE_matched",
                             "distal_log2FE_matched", "median_n_tfs", "top_tfs")
                 if c in show.columns]
-        st.dataframe(show[cols], hide_index=True, use_container_width=True)
+        st.dataframe(show[cols], hide_index=True, use_container_width=True,
+                     column_config=ui.PROGRAM_COLUMNS)
         st.caption(f"{len(view):,} of {len(progs):,} programs shown.")
 
     # ---- one program ------------------------------------------------------
@@ -99,9 +100,42 @@ def render() -> None:
                     help="Distances are medians and p90 rather than means: the "
                          "distribution is heavily skewed, so a mean would "
                          "describe no actual element.")
-        st.dataframe(db.get_program_element_stats(int(sel)),
-                     hide_index=True, use_container_width=True)
+        st.dataframe(
+            db.get_program_element_stats(int(sel)),
+            hide_index=True, use_container_width=True,
+            column_config={
+                "stratum": st.column_config.TextColumn(
+                    "stratum",
+                    help="Where the element sits relative to the nearest "
+                         "canonical TSS: promoter (within ±1.5 kb), proximal, "
+                         "or distal."),
+                "n": st.column_config.NumberColumn(
+                    "elements", format="%d",
+                    help="This program's elements in that stratum."),
+                "median_dist": st.column_config.NumberColumn(
+                    "median bp", format="%d",
+                    help="Median absolute distance to the nearest TSS. Median "
+                         "rather than mean: the distribution spans three "
+                         "orders of magnitude and a mean would describe no "
+                         "actual element."),
+                "p90_dist": st.column_config.NumberColumn(
+                    "p90 bp", format="%d",
+                    help="90th percentile distance — the tail the median "
+                         "hides. A program can have a 500 bp median and a "
+                         "1.7 Mb p90."),
+                "median_tfs": st.column_config.NumberColumn(
+                    "median TFs", format="%d",
+                    help="Median assigned TFs per element in this stratum. "
+                         "Promoter elements carry roughly twice as many as "
+                         "distal ones, which is why the enrichments are "
+                         "complexity-matched."),
+                "median_width": st.column_config.NumberColumn(
+                    "median width", format="%d",
+                    help="Median element width in bp."),
+            })
 
     st.markdown("**Top transcription factors**")
-    st.dataframe(db.get_genome_program_tfs(int(sel), limit=30),
-                 hide_index=True, use_container_width=True)
+    st.dataframe(
+        db.get_genome_program_tfs(int(sel), limit=30),
+        hide_index=True, use_container_width=True,
+        column_config=ui.PROGRAM_TF_COLUMNS)

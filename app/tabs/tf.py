@@ -30,7 +30,7 @@ HELP_CLUSTERS = (
     "the per-promoter NMF programs."
 )
 HELP_TOP_TSS = (
-    "Canonical TSSs with the most chip-atlas peaks at score ≥ 500 within "
+    "Canonical TSSs with the most chip-atlas peaks at score ≥ {thr} within "
     "their ±1.5 kb window. `# peaks` counts recentered 25-nt blocks for this "
     "TF at this TSS — a TF can have multiple peaks at one promoter."
 )
@@ -320,14 +320,17 @@ def render() -> None:
 
     # ---- Top TSSs ----------------------------------------------------------
     with st.container(border=True):
-        st.markdown("### Top TSSs bound by this TF (score ≥ 500)",
-                     help=HELP_TOP_TSS)
+        # get_top_tss_for_tf filters at min_score_assign(); these three
+        # labels said 500 while it ran at 250.
+        thr = db.min_score_assign()
+        st.markdown(f"### Top TSSs bound by this TF (score ≥ {thr})",
+                     help=HELP_TOP_TSS.replace("{thr}", str(thr)))
         n_top = st.slider("# of top TSSs", 25, 500, 100, step=25,
                            help="How many of the most-bound canonical TSSs "
                                 "to show.")
         top = db.get_top_tss_for_tf(tf, limit=n_top)
         if top.empty:
-            st.info(f"No score≥{db.min_score_assign()} peaks for this TF in the canonical-TSS "
+            st.info(f"No score≥{thr} peaks for this TF in the canonical-TSS "
                     "windows.")
         else:
             st.dataframe(
@@ -341,8 +344,8 @@ def render() -> None:
                         help="Gene symbol of that transcript."),
                     "n_peaks_assigned": st.column_config.NumberColumn(
                         "# peaks (assigned)",
-                        help="Number of recentered 25-nt peaks for this "
-                             "TF at this TSS, score ≥ 500."),
+                        help=f"Number of recentered 25-nt peaks for this "
+                             f"TF at this TSS, score ≥ {thr}."),
                     "min_offset":  st.column_config.NumberColumn(
                         "earliest bp",
                         help="Most upstream peak position (txn-oriented "

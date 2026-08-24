@@ -35,7 +35,7 @@ GLOSSARY = [
      "A local concentration of distinct-TF binding within ±1.5 kb of a TSS, "
      "found as a peak in the per-TSS KDE density (σ = 25 bp). A module is "
      "supported by ≥2 distinct TFs (any score) and is assigned the TFs that "
-     "have ≥1 peak with score ≥ 500 inside its boundaries."),
+     "have ≥1 peak with score ≥ {thr} inside its boundaries."),
     ("Program",
      "An NMF component over the [n_module × n_TF] occupancy matrix. We chose "
      "k=10 by ARI stability + Brunet cophenetic correlation (both peaked at "
@@ -349,8 +349,12 @@ def render() -> None:
         st.markdown("### Glossary",
                      help="Short definitions of the key terms used throughout "
                           "the atlas.")
+        # {thr} substituted from the manifest, not formatted: the glossary
+        # is prose and some entries contain literal braces.
+        thr = db.min_score_assign()
         st.dataframe(
-            pd.DataFrame(GLOSSARY, columns=["Term", "Definition"]),
+            pd.DataFrame([(t, d.replace("{thr}", str(thr))) for t, d in GLOSSARY],
+                          columns=["Term", "Definition"]),
             hide_index=True, width="stretch",
             column_config={
                 "Term": st.column_config.TextColumn(width="small"),
