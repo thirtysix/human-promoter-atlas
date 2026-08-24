@@ -649,10 +649,12 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
         # once -- the standard genome-browser guide. Opacity is lower than the
         # single-row version was: the same 0.18 laid over a dense rug muddied
         # the tick colours it is meant to help you read.
+        # Only the density row here; the bands are extended across the rest
+        # after every row has traces -- see the loop before `return fig`.
         fig.add_vrect(
             x0=m["lo_offset"], x1=m["hi_offset"],
             fillcolor=fillcolor,
-            opacity=0.11, line_width=0, layer="below", row="all", col=1,
+            opacity=0.11, line_width=0, layer="below", row=1, col=1,
         )
 
     if has_gs:
@@ -752,6 +754,28 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
     # fraction of its height and made the rows unreadable. Position along the
     # x-axis is the only dimension worth zooming.
     fig.update_yaxes(fixedrange=True)
+
+    # Module bands across EVERY row, added last on purpose.
+    #
+    # Plotly drops a shape whose target subplot has no traces yet -- silently,
+    # no warning. Adding these next to the density curve, before the structure,
+    # rug and module rows were populated, meant rows 2..n were skipped and the
+    # bands stopped at the first plot. row="all" fails the same way for the
+    # same reason. Verified with a four-row repro: four add_vrect calls on an
+    # empty figure produce ZERO shapes, four on a populated one produce four.
+    #
+    # exclude_empty_subplots=False would also work, but running last is the
+    # honest fix: it does not depend on remembering the flag, and any row that
+    # genuinely has no traces should not get a band anyway.
+    for _, m in modules_df.iterrows():
+        raw = m.get("dominant_program")
+        band = (PROGRAM_COLORS[(int(raw) - 1) % len(PROGRAM_COLORS)]
+                if pd.notna(raw) else REFERENCE)
+        for _r in range(2, n_rows + 1):
+            fig.add_vrect(
+                x0=m["lo_offset"], x1=m["hi_offset"], fillcolor=band,
+                opacity=0.11, line_width=0, layer="below", row=_r, col=1,
+            )
     fig.update_xaxes(title_text="bp from TSS (txn-oriented)",
                       row=n_rows, col=1)
     fig.update_yaxes(title_text="density", row=1, col=1, showgrid=False)
