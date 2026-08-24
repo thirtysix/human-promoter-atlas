@@ -443,27 +443,55 @@ def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "") -> 
     case a reader most needs to see, not one to filter away.
     """
     if gs is None or gs.empty:
-        return
+        return 0
     # One lane per TRANSCRIPT. A merged gene model hides alternative first
     # exons, which is the structure a promoter view exists to show.
     key = gs["transcript_id"].fillna("")
-    order = [t for t in key.unique() if t]
-    # focal transcript first, so it reads at the top of the track
-    if focal_tx in order:
-        order = [focal_tx] + [t for t in order if t != focal_tx]
-    # TP53 has 17 coding transcripts in a 3 kb window; drawing them all makes
-    # the track a third of the figure and none of them legible. The focal one
-    # is always kept, and the overflow is stated rather than silently dropped.
-    n_total = len(order)
-    order = order[:MAX_STRUCTURE_LANES]
-    lanes = {t: i for i, t in enumerate(order)}
-    seen = [(t + ("  ←" if t == focal_tx else "")) for t in order]
-    if n_total > len(order):
-        seen[-1] += f"  (+{n_total - len(order)} more)"
+
+    # DEDUPLICATE BY STRUCTURE IN THIS WINDOW. Transcripts of one gene mostly
+    # share a promoter, so their first exons coincide: TP53's 17 coding
+    # transcripts drew 17 lanes of the same small box at x=0, separated by
+    # whitespace, filling ~1,160 px to say one thing. Identical footprints
+    # collapse to a single lane labelled with the count.
+    sig = {}
+    for t, g in gs.groupby(key):
+        if not t:
+            continue
+        sig[t] = tuple(sorted(zip(g.local_start, g.local_end, g.feature)))
+    groups = {}
+    for t, k in sig.items():
+        groups.setdefault(k, []).append(t)
+    # the focal transcript's group first; then largest groups
+    def _rank(item):
+        k, members = item
+        return (0 if focal_tx in members else 1, -len(members))
+    ordered = sorted(groups.items(), key=_rank)
+    n_groups = len(ordered)
+    ordered = ordered[:MAX_STRUCTURE_LANES]
+
+    labels, lanes, reps = [], {}, []
+    for k, members in ordered:
+        rep = focal_tx if focal_tx in members else sorted(members)[0]
+        reps.append(rep)
+        extra = f"  ×{len(members)}" if len(members) > 1 else ""
+        labels.append(rep + extra + ("  ←" if rep == focal_tx else ""))
+        for t in members:
+            lanes[t] = len(reps) - 1
+    # lane 0 renders at the BOTTOM of a y-axis, so the focal transcript was
+    # appearing last. Invert so it reads at the top.
+    top = len(reps) - 1
+    lanes = {t: top - i for t, i in lanes.items()}
+    seen = list(reversed(labels))
+    order = reps
+    n_total = n_groups
+    drawn = set()
     for label, g in gs.groupby(key):
         if label not in lanes:
             continue
         lane = lanes[label]
+        if lane in drawn:          # a collapsed duplicate; already drawn
+            continue
+        drawn.add(lane)
         focal = label == focal_tx
         colour = PRIMARY if focal else REFERENCE
         # thin backbone spanning the gene's extent in view
@@ -494,6 +522,10 @@ def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "") -> 
     fig.update_yaxes(row=row, col=1, tickmode="array",
                      tickvals=list(range(len(seen))), ticktext=seen,
                      range=[-0.6, len(seen) - 0.4], showgrid=False)
+    # The overflow count goes in the subplot title, not an annotation. Anchored
+    # with xref="paper" alongside row/col it landed on top of a transcript lane
+    # rather than in the margin.
+    return max(0, n_total - len(seen))
 
 
 def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
@@ -566,7 +598,7 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
                else min(gene_structure.transcript_id.nunique(),
                         MAX_STRUCTURE_LANES))
     has_gs = n_lanes > 0
-    gs_h = max(0.3, 0.22 * n_lanes) if has_gs else 0.0
+    gs_h = max(0.22, 0.13 * n_lanes) if has_gs else 0.0
     row_heights = ([1.0] + ([gs_h] if has_gs else []) + [rug_h, 0.5]
                    + [0.32] * n_prog)
     n_rows = 3 + n_prog + (1 if has_gs else 0)
@@ -618,8 +650,14 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
         )
 
     if has_gs:
-        _add_gene_structure(fig, gene_structure, row_gs,
-                            focal_tx=str(tss_meta.get("transcript_id", "")))
+        n_hidden = _add_gene_structure(
+            fig, gene_structure, row_gs,
+            focal_tx=str(tss_meta.get("transcript_id", "")))
+        if n_hidden and fig.layout.annotations:
+            for a in fig.layout.annotations:
+                if a.text and a.text.startswith("protein-coding structure"):
+                    a.text += f"  — +{n_hidden} more not shown"
+                    break
 
     # (2) TF rug rows — TF identity = color, one solid hue per row.
     # We attempted score-as-opacity and score-as-marker-size, but both
@@ -1189,7 +1227,7 @@ def fig_tf_program_loadings(loadings_df: pd.DataFrame, tf: str) -> go.Figure:
 FAMILY_COLORS = (pc.qualitative.Dark24 + pc.qualitative.Light24)
 
 # Transcript lanes drawn in the structure track before overflow is summarised.
-MAX_STRUCTURE_LANES = 8
+MAX_STRUCTURE_LANES = 6
 
 
 def gene_zoom_levels(dist, promoter_half: int = OUTER_HALF,
