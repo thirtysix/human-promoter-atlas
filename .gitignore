@@ -53,3 +53,7 @@ LessonsLearned.md
 
 # Fetched analysis outputs (165 MB+; regenerate on the cluster)
 analysis/
+
+# Build artifacts (regenerate with data/build_*.py)
+data/peaks.parquet
+data/gene_structure.parquet

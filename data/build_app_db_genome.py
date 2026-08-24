@@ -395,7 +395,8 @@ def _write_genome_manifest(con, root: Path, k: int, db_path: Path):
         "min_support_basis": "circular-shift null, 5% FDR genome-wide",
         "valid_chroms": ["1-22", "X"],
         "excluded_chroms": ["Y", "MT"],
-        "source": str(root),
+        # name only -- see the analysis_dn note in data/build_app_db.py
+        "source": Path(root).name,
     }
     m.setdefault("counts", {})["n_programs_served"] = m["genome"]["n_programs"]
     mf.write_text(json.dumps(m, indent=2))

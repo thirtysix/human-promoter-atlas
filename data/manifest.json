@@ -1,19 +1,20 @@
 {
-  "built_at": "2026-04-30T19:51:59",
-  "analysis_dn": "data/raw/analyses",
+  "built_at": "2026-08-24T12:24:47",
+  "analysis_dn": "q1e-5.all.s250",
   "k_canonical": 10,
-  "a_canonical": 8,
+  "a_canonical": 0,
   "build": {
-    "tier": "q1e-50",
-    "qvalue": 1e-50,
-    "tf_set": "whitelist",
-    "min_score_assign": 500
+    "tier": "q1e-5",
+    "qvalue": 1e-05,
+    "tf_set": "all",
+    "min_score_assign": 250
   },
   "counts": {
-    "n_tf": 1304,
+    "n_tf": 1793,
     "n_tss": 19745,
-    "n_modules": 76999,
-    "n_programs": 10
+    "n_modules": 117006,
+    "n_promoter_programs": null,
+    "n_programs_served": 140
   },
   "datasets": {
     "ensembl": "GRCh38.114",
@@ -29,7 +30,7 @@
     "tss_modules_outer_half_bp": 1500,
     "tss_modules_kde_bw_bp": 25,
     "tss_modules_min_support_tfs": 2,
-    "tss_modules_min_score_assign": 500,
+    "tss_modules_min_score_assign": 250,
     "tss_modules_boundary_frac": 0.2,
     "valid_chroms": [
       "1-22",
@@ -49,5 +50,29 @@
     "program_go_top",
     "tf_clusters",
     "gene_configs"
-  ]
+  ],
+  "genome": {
+    "k": 140,
+    "n_elements": 467223,
+    "n_programs": 140,
+    "n_programs_substantive": 72,
+    "n_families": 28,
+    "n_families_named": 27,
+    "strata": {
+      "distal": 353550,
+      "promoter": 49857,
+      "proximal": 63816
+    },
+    "min_support": 11,
+    "min_support_basis": "circular-shift null, 5% FDR genome-wide",
+    "valid_chroms": [
+      "1-22",
+      "X"
+    ],
+    "excluded_chroms": [
+      "Y",
+      "MT"
+    ],
+    "source": "genome.q1e-5.all.s250.chr1-2-3-4-5-6-7-8-9-10-11-12-13-14-15-16-17-18-19-20-21-22-X.nbhd1500.sup11"
+  }
 }

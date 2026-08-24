@@ -759,7 +759,12 @@ def write_manifest(canonical_A: int = 0, counts: dict | None = None):
     counts = counts or {}
     manifest = {
         "built_at": datetime.now().isoformat(timespec="seconds"),
-        "analysis_dn": str(ANALYSIS_DN),
+        # BUILD DIRECTORY NAME ONLY, never the absolute path. manifest.json is
+        # committed to a public repo, and the full path leaks the local
+        # filesystem layout -- the publish gate flags it as house-local-abs-path.
+        # The name is what identifies the build; where it sat on one machine is
+        # not information anyone else can use.
+        "analysis_dn": ANALYSIS_DN.name,
         "k_canonical": K_CANONICAL,
         "a_canonical": canonical_A,
         "build": {
