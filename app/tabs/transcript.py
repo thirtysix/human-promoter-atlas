@@ -815,6 +815,22 @@ def _render_neighbourhood(tss_meta) -> None:
         return
 
     n_far = int((el.stratum != "promoter").sum())
+    if n_far == 0:
+        # 789 genes (4.2%) have only promoter-stratum elements. Drawing a
+        # neighbourhood plot for them is worse than drawing nothing: the zoom
+        # collapses to a span narrower than the promoter box, so the shading
+        # covers the whole canvas and one or two markers sit against it. Say
+        # the fact in a line instead.
+        n_el = len(el)
+        with st.container(border=True):
+            st.markdown("### Beyond the promoter window")
+            st.caption(
+                f"No proximal or distal elements for this gene — all "
+                f"{n_el} of its genome-wide element{'s' if n_el != 1 else ''} "
+                f"fall inside the promoter window. This is the case for 789 "
+                f"of 18,984 genes (4.2%)."
+            )
+        return
     with st.container(border=True):
         st.markdown(
             f"### Beyond the promoter window — {n_far:,} further elements",
