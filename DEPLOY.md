@@ -47,12 +47,20 @@ make db                                    # writes data/canonical_promoter.duck
 python data/build_depmap_pair_matrices.py  # slim DepMap matrices
 python data/build_depmap_tf_target_correlations.py
 python data/build_tf_pair_table.py         # TF×TF co-occurrence
+python data/build_aggregate_npy.py         # memory-mapped aggregate sidecars
 ```
 
 These scripts read from `HPA_ANALYSIS_DIR` (upstream chip-atlas analysis
 outputs) and `HPA_DEPMAP_RAW` (raw DepMap CSVs). Defaults are
 `data/raw/analyses/` and `data/raw/depmap/` — override via env vars if
 the source data lives elsewhere on your machine.
+
+`build_aggregate_npy.py` must be re-run whenever the aggregate parquets
+change. It is not optional for memory, but it is optional for correctness:
+the app checks each sidecar against its parquet's row order and falls back
+to reading the parquet if they disagree, so a forgotten rebuild costs about
+200 MB of resident memory rather than serving misaligned rows. The sidecars
+add ~21 MB of disk per flavour.
 
 ## Rollback
 

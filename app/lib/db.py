@@ -9,7 +9,10 @@ from typing import Optional
 import duckdb
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import streamlit as st
+
+from app.lib import matrix_sidecar
 
 
 # Resolve data dir relative to repo root (app/lib/db.py -> ../../data/)
@@ -634,6 +637,57 @@ def depmap_cell_line_metadata() -> pd.DataFrame:
     return pd.DataFrame()
 
 
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def _parquet_column_names(path_str: str) -> set[str]:
+    """Column names of a parquet, from its footer only — no data read."""
+    try:
+        return set(pq.ParquetFile(path_str).schema.names)
+    except Exception:
+        return set()
+
+
+def _depmap_columns(parquet: Path, csv_loader, wanted: tuple[str, ...]) -> pd.DataFrame:
+    """[ModelID x wanted] slice of a wide DepMap matrix.
+
+    The two callers below need one or a handful of gene columns. Reading the
+    whole frame to get them cost ~275 MB RSS against ~10 MB for the
+    projection, and it was cached with @st.cache_resource -- no TTL -- so one
+    visitor opening one scatter pinned that memory for the life of the
+    process. That is the 82%-inactive_anon signature: loaded once, never
+    touched again.
+
+    build_depmap_pair_matrices.py already writes ModelID as a plain column
+    "so column-projection reads don't need to materialize an index"; this is
+    the reader that finally uses it.
+
+    The CSV path is the development fallback and still loads whole: the raw
+    columns carry an ` (entrez)` suffix that usecols cannot address without
+    reading the header first, and production deploys the parquets.
+    """
+    if parquet.exists():
+        avail = _parquet_column_names(str(parquet))
+        cols = [c for c in wanted if c in avail]
+        if not cols:
+            return pd.DataFrame()
+        return pd.read_parquet(parquet,
+                                columns=["ModelID", *cols]).set_index("ModelID")
+    full = csv_loader()
+    if full.empty:
+        return pd.DataFrame()
+    cols = [c for c in wanted if c in full.columns]
+    return full.loc[:, cols] if cols else pd.DataFrame()
+
+
+def depmap_chronos_columns(tfs: tuple[str, ...]) -> pd.DataFrame:
+    """Chronos essentiality for `tfs` only, cell lines as the index."""
+    return _depmap_columns(DEPMAP_CHRONOS_PARQUET, depmap_chronos_matrix, tfs)
+
+
+def depmap_expression_columns(genes: tuple[str, ...]) -> pd.DataFrame:
+    """log10(TPM+1) expression for `genes` only, cell lines as the index."""
+    return _depmap_columns(DEPMAP_EXPR_PARQUET, depmap_expression_matrix, genes)
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def depmap_tf_target_correlation(
     target: str, tfs: tuple[str, ...],
@@ -672,9 +726,11 @@ def depmap_tf_target_correlation(
         out = out.reindex(out["r"].abs().sort_values(ascending=False).index)
         return out.reset_index(drop=True)
 
-    # --- Fallback: runtime computation from raw CSVs ----------------------
-    chro = depmap_chronos_matrix()
-    expr = depmap_expression_matrix()
+    # --- Fallback: runtime computation ------------------------------------
+    # Projected to the requested TFs and the one target, not the whole
+    # matrices -- see _depmap_columns.
+    chro = depmap_chronos_columns(tuple(tfs))
+    expr = depmap_expression_columns((target,))
     if chro.empty or expr.empty or target not in expr.columns:
         return pd.DataFrame(columns=["tf", "r", "n_cell_lines"])
 
@@ -715,8 +771,8 @@ def depmap_tf_target_pair_values(target: str, tf: str) -> pd.DataFrame:
     """Per-cell-line (tf_chronos, target_expr, lineage, cell_line_name) for
     one (TF, target) pair. Used by the scatter plot. Empty if either is
     missing from its matrix."""
-    chro = depmap_chronos_matrix()
-    expr = depmap_expression_matrix()
+    chro = depmap_chronos_columns((tf,))
+    expr = depmap_expression_columns((target,))
     if (chro.empty or expr.empty
             or tf not in chro.columns or target not in expr.columns):
         return pd.DataFrame()
@@ -1260,11 +1316,56 @@ def gtex_tf_target_correlations(transcript_id: str,
     return df
 
 
+def _aggregate_parquet(flavor: str) -> Path:
+    return AGG_DIR / f"tf_x_position.{flavor}.parquet"
+
+
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
+def _aggregate_tf_order(flavor: str) -> list[str]:
+    """The matrix's row order, straight from the parquet's TF column.
+
+    One column of 1,793 strings, so it is cheap, and it is the AUTHORITY the
+    sidecar is checked against -- reading it from the sidecar's own metadata
+    would be checking a file against itself.
+    """
+    fn = _aggregate_parquet(flavor)
+    if not fn.exists():
+        return []
+    return [str(t) for t in pd.read_parquet(fn, columns=["TF"])["TF"]]
+
+
+@st.cache_resource(show_spinner=False)
+def _aggregate_memmap(flavor: str):
+    """Memory-mapped sidecar for one flavour, or None to use the parquet."""
+    tfs = _aggregate_tf_order(flavor)
+    if not tfs:
+        return None
+    return matrix_sidecar.load(
+        AGG_DIR / f"tf_x_position.{flavor}.npy", tfs)
+
+
+# cache_resource, NOT cache_data: cache_data pickles what it stores, which
+# would copy the memory map straight back into the heap this exists to keep
+# it out of. Nothing mutates the matrix -- the map is opened read-only, so an
+# attempt would raise rather than corrupt a shared object.
+@st.cache_resource(show_spinner=False)
 def load_aggregate_matrix(flavor: str = "binary") -> pd.DataFrame:
-    """Load TF×position matrix from parquet. flavor in
-    {binary, score, raw, raw_score1000}."""
-    fn = AGG_DIR / f"tf_x_position.{flavor}.parquet"
+    """TF×position matrix. flavor in {binary, score, raw, raw_score1000}.
+
+    Prefers the memory-mapped sidecar written by data/build_aggregate_npy.py
+    and falls back to the parquet when it is absent or does not match the
+    parquet's row order. The fallback is the whole point: this ships safely
+    before the build step has been run anywhere, and a stale sidecar costs
+    memory rather than correctness.
+    """
+    side = _aggregate_memmap(flavor)
+    if side is not None:
+        values, tfs, cols = side
+        # copy=False keeps the frame pointing at the mapped pages; building
+        # it measured +0.0 MB against +104 MB for the parquet read.
+        return pd.DataFrame(values, index=pd.Index(tfs, name="TF"),
+                             columns=cols, copy=False)
+    fn = _aggregate_parquet(flavor)
     if not fn.exists():
         return pd.DataFrame()
     df = pd.read_parquet(fn)
