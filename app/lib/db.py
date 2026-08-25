@@ -1037,11 +1037,14 @@ def _tf_pair_table_full() -> pd.DataFrame:
     """All ~330k atlas-wide TF pairs (lower-triangular, n_shared ≥ 5)."""
     if not TF_PAIR_PARQUET.exists():
         return pd.DataFrame()
-    df = pd.read_parquet(TF_PAIR_PARQUET)
-    # Cast categoricals back to plain strings for downstream filtering.
-    df["tf_a"] = df["tf_a"].astype(str)
-    df["tf_b"] = df["tf_b"].astype(str)
-    return df
+    # Kept CATEGORICAL. Casting the two TF columns to plain strings cost
+    # 26.5 MB per column against 1.1 MB stored -- 24x -- and the frame went
+    # from 12.0 MB to 63.1 MB deep, permanently, because this is
+    # @st.cache_resource and never expires. Nothing downstream needs object
+    # dtype: the only consumer substring-matches, which tf_pair_query now
+    # does against the 1,367 CATEGORIES instead of 517,213 rows, and the
+    # slice it returns is cast back so callers see the dtype they always did.
+    return pd.read_parquet(TF_PAIR_PARQUET)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -1069,14 +1072,32 @@ def tf_pair_query(
 
     if search:
         s = search.strip().upper()
-        mask = (df["tf_a"].str.upper().str.contains(s, regex=False) |
-                df["tf_b"].str.upper().str.contains(s, regex=False))
-        df = df[mask]
+
+        def _matches(col: pd.Series) -> pd.Series:
+            """Substring test done once per CATEGORY, not once per row.
+
+            Equivalent to `col.str.upper().str.contains(s, regex=False)` --
+            the same plain substring test -- but evaluated over 1,367 unique
+            TF names rather than 517,213 rows, and without materialising an
+            uppercased copy of the whole column on every keystroke.
+            """
+            cats = (col.cat.categories
+                    if isinstance(col.dtype, pd.CategoricalDtype)
+                    else pd.Index(col.dropna().unique()))
+            hits = [c for c in cats if s in str(c).upper()]
+            return col.isin(hits)
+
+        df = df[_matches(df["tf_a"]) | _matches(df["tf_b"])]
 
     if sort_by not in df.columns:
         sort_by = "n_shared"
     df = df.sort_values(sort_by, ascending=bool(ascending))
-    return df.head(int(limit)).reset_index(drop=True)
+    out = df.head(int(limit)).reset_index(drop=True)
+    # Cast only the slice -- a few hundred rows, not the whole table.
+    for c in ("tf_a", "tf_b"):
+        if c in out.columns:
+            out[c] = out[c].astype(str)
+    return out
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
