@@ -13,8 +13,20 @@ from app.lib import db, ui
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
 def _full_table_gzipped() -> bytes:
-    """Gzipped TSV of the entire 327k-pair table — cached so the
-    serialization + compression only runs once per process lifetime."""
+    """Gzipped TSV of the whole pair table, for the download button.
+
+    Read from the artifact data/build_tf_pair_table.py writes. Building it
+    here instead cost 83 MB of anon memory on the first render -- all 517,213
+    rows materialised and serialised -- and this sits inside an expander,
+    which Streamlit renders even when collapsed, so every cold start paid it
+    whether or not anyone wanted the file.
+
+    The fallback keeps the button working on a data directory built before
+    that step existed; it is the old behaviour, memory cost included.
+    """
+    fn = db.TF_PAIR_PARQUET.with_name("tf_pair_cooccurrence.tsv.gz")
+    if fn.exists():
+        return fn.read_bytes()
     import gzip
     full = db.tf_pair_query(
         search="", min_shared=0, min_jaccard=0.0,

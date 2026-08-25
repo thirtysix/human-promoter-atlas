@@ -32,6 +32,7 @@ from scipy.sparse import csr_matrix
 REPO_DIR = Path(__file__).resolve().parents[1]
 SRC_PQ   = REPO_DIR / "data" / "gtex" / "module_tf_target_correlation.parquet"
 OUT_PQ   = REPO_DIR / "data" / "network" / "tf_pair_cooccurrence.parquet"
+OUT_GZ   = REPO_DIR / "data" / "network" / "tf_pair_cooccurrence.tsv.gz"
 
 # Drop pairs that almost never co-occur — keeps the file small without
 # losing any analytically interesting signal. 5 shared modules is the
@@ -112,6 +113,18 @@ def main() -> None:
     out.to_parquet(OUT_PQ, index=False, compression="zstd")
     size_mb = OUT_PQ.stat().st_size / 1024 / 1024
     print(f"Wrote {OUT_PQ}  ({size_mb:.1f} MB)")
+
+    # The app offers this whole table as a TSV.gz download. Building it at
+    # request time meant materialising all 517k rows and serialising them on
+    # the first render of the page -- 83 MB of anon memory for a 6.8 MB file,
+    # and the expander renders even when collapsed, so every cold start paid
+    # it. Write it once here instead.
+    import gzip
+    t0 = time.time()
+    with gzip.open(OUT_GZ, "wb", compresslevel=6) as fh:
+        fh.write(out.to_csv(sep="\t", index=False).encode())
+    print(f"Wrote {OUT_GZ}  ({OUT_GZ.stat().st_size / 1024 / 1024:.1f} MB, "
+          f"{time.time()-t0:.1f}s)")
     print("\nHead:")
     print(out.head(10).to_string(index=False))
 

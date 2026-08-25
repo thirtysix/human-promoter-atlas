@@ -1032,19 +1032,9 @@ def tf_pair_table_available() -> bool:
     return TF_PAIR_PARQUET.exists()
 
 
-@st.cache_resource(show_spinner="Loading TF pair table…")
-def _tf_pair_table_full() -> pd.DataFrame:
-    """All ~330k atlas-wide TF pairs (lower-triangular, n_shared ≥ 5)."""
-    if not TF_PAIR_PARQUET.exists():
-        return pd.DataFrame()
-    # Kept CATEGORICAL. Casting the two TF columns to plain strings cost
-    # 26.5 MB per column against 1.1 MB stored -- 24x -- and the frame went
-    # from 12.0 MB to 63.1 MB deep, permanently, because this is
-    # @st.cache_resource and never expires. Nothing downstream needs object
-    # dtype: the only consumer substring-matches, which tf_pair_query now
-    # does against the 1,367 CATEGORIES instead of 517,213 rows, and the
-    # slice it returns is cast back so callers see the dtype they always did.
-    return pd.read_parquet(TF_PAIR_PARQUET)
+# Sort columns the UI offers. Whitelisted because the value is interpolated
+# into ORDER BY, which parameters cannot bind.
+_TF_PAIR_SORTS = ("n_shared", "jaccard", "lift")
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -1053,51 +1043,42 @@ def tf_pair_query(
     sort_by: str = "n_shared", ascending: bool = False,
     limit: int = 200,
 ) -> pd.DataFrame:
-    """Filtered + sorted slice of the TF-pair table.
+    """Filtered + sorted slice of the TF-pair table, straight from parquet.
 
     search:      case-insensitive substring; matches either TF in the pair.
                  Empty = no filter.
     min_shared:  minimum n_shared modules to keep.
     min_jaccard: minimum Jaccard overlap to keep.
     sort_by:     'n_shared', 'jaccard', or 'lift'.
+
+    Was a whole-table load under @st.cache_resource -- 517,213 rows resident
+    for the life of the process, 46.8 MB anon, to answer queries that return
+    a couple of hundred rows. Every consumer filters, sorts and limits, which
+    is a SQL query, and the handoff's rule applies: the question is not "is
+    this too big" but "does this need to be resident at all". DuckDB reads the
+    parquet's column chunks and keeps nothing.
+
+    ORDER BY carries an explicit (tf_a, tf_b) tiebreak. The pandas version
+    sorted with an unstable quicksort, so tied rows came back in arbitrary
+    order that could differ between runs; this is deterministic.
     """
-    df = _tf_pair_table_full()
-    if df.empty:
-        return df
-
-    if min_shared > 0:
-        df = df[df["n_shared"] >= int(min_shared)]
-    if min_jaccard > 0:
-        df = df[df["jaccard"] >= float(min_jaccard)]
-
-    if search:
-        s = search.strip().upper()
-
-        def _matches(col: pd.Series) -> pd.Series:
-            """Substring test done once per CATEGORY, not once per row.
-
-            Equivalent to `col.str.upper().str.contains(s, regex=False)` --
-            the same plain substring test -- but evaluated over 1,367 unique
-            TF names rather than 517,213 rows, and without materialising an
-            uppercased copy of the whole column on every keystroke.
-            """
-            cats = (col.cat.categories
-                    if isinstance(col.dtype, pd.CategoricalDtype)
-                    else pd.Index(col.dropna().unique()))
-            hits = [c for c in cats if s in str(c).upper()]
-            return col.isin(hits)
-
-        df = df[_matches(df["tf_a"]) | _matches(df["tf_b"])]
-
-    if sort_by not in df.columns:
-        sort_by = "n_shared"
-    df = df.sort_values(sort_by, ascending=bool(ascending))
-    out = df.head(int(limit)).reset_index(drop=True)
-    # Cast only the slice -- a few hundred rows, not the whole table.
-    for c in ("tf_a", "tf_b"):
-        if c in out.columns:
-            out[c] = out[c].astype(str)
-    return out
+    if not TF_PAIR_PARQUET.exists():
+        return pd.DataFrame()
+    col = sort_by if sort_by in _TF_PAIR_SORTS else "n_shared"
+    direction = "ASC" if ascending else "DESC"
+    s = (search or "").strip().upper()
+    return get_con().execute(
+        f"""SELECT tf_a, tf_b, n_shared, n_a, n_b, jaccard, lift
+            FROM read_parquet(?)
+            WHERE n_shared >= ?
+              AND jaccard  >= ?
+              AND (? = ''
+                   OR contains(upper(tf_a), ?)
+                   OR contains(upper(tf_b), ?))
+            ORDER BY {col} {direction}, tf_a, tf_b
+            LIMIT ?""",
+        [str(TF_PAIR_PARQUET), int(min_shared), float(min_jaccard),
+         s, s, s, int(limit)]).df()
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
@@ -1111,17 +1092,26 @@ def tf_pair_table_stats(lift_min_shared: int = 1000) -> dict:
     interesting. Matching the floor to the default table filter (1 000)
     keeps the header metric aligned with what the user actually sees.
     """
-    df = _tf_pair_table_full()
-    if df.empty:
+    if not TF_PAIR_PARQUET.exists():
         return {}
-    lift_pool = df[df["n_shared"] >= int(lift_min_shared)]
-    if lift_pool.empty:
-        lift_pool = df
+    fn = str(TF_PAIR_PARQUET)
+    row = get_con().execute(
+        """SELECT COUNT(*) AS n_pairs, MAX(n_shared) AS max_share,
+                  MAX(lift) FILTER (WHERE n_shared >= ?) AS max_lift_floor,
+                  MAX(lift) AS max_lift_all
+           FROM read_parquet(?)""", [int(lift_min_shared), fn]).fetchone()
+    if not row or not row[0]:
+        return {}
+    n_tfs = get_con().execute(
+        """SELECT COUNT(*) FROM (
+             SELECT tf_a AS tf FROM read_parquet(?)
+             UNION SELECT tf_b FROM read_parquet(?))""", [fn, fn]).fetchone()[0]
     return {
-        "n_pairs":        int(len(df)),
-        "n_tfs":          int(len(set(df["tf_a"]) | set(df["tf_b"]))),
-        "max_share":      int(df["n_shared"].max()),
-        "max_lift":       float(lift_pool["lift"].max()),
+        "n_pairs":        int(row[0]),
+        "n_tfs":          int(n_tfs),
+        "max_share":      int(row[1]),
+        # the floor can empty the pool on a small table; fall back to all
+        "max_lift":       float(row[2] if row[2] is not None else row[3]),
         "lift_min_shared": int(lift_min_shared),
     }
 
