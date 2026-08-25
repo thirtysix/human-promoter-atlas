@@ -1,9 +1,17 @@
 [server]
 port = 8501
 headless = true
+# runOnSave depends on the watcher, and fileWatcherType = "none" disables it,
+# so the two contradicted: passing --server.runOnSave true did nothing and
+# every edit needed a manual restart. Both off, stated once.
 runOnSave = false
 fileWatcherType = "none"
 maxUploadSize = 5
+
+[client]
+# Hides the "Deploy" button and the developer menu, which were showing to
+# every visitor in the top-right of every page.
+toolbarMode = "viewer"
 
 [browser]
 gatherUsageStats = false

@@ -1522,6 +1522,50 @@ def get_genes_in_family(family: int, limit: int = 200) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
+def list_family_go_terms() -> pd.DataFrame:
+    """Every MSigDB term enriched in at least one program family.
+
+    Replaces list_go_terms() for the reverse-search page. That one reads
+    program_go_top / archetype_go_top, which belong to the promoter layer and
+    are empty on this build -- the page was a dead nav entry. family_terms is
+    populated (2,966 rows over 27 of the 28 families) and carries an FDR on
+    every row.
+
+    Grouped by `label` rather than `term` because the label is the readable
+    form the picker searches; the raw MSigDB name comes along for provenance.
+    """
+    return get_con().execute(
+        """SELECT label,
+                  any_value(term)  AS term,
+                  any_value(go_id) AS go_id,
+                  any_value(lib)   AS lib,
+                  COUNT(DISTINCT family) AS n_families,
+                  MIN(q)    AS min_q,
+                  MAX(odds) AS max_odds
+           FROM family_terms
+           GROUP BY label
+           ORDER BY n_families DESC, min_q ASC""").df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def families_for_go_term(label: str) -> pd.DataFrame:
+    """Which families enrich for one term, best evidence first.
+
+    `is_label` marks the row a family's own displayed name came from, so a
+    reader can see whether this term IS what the family is called or merely
+    something it also hits.
+    """
+    return get_con().execute(
+        """SELECT t.family, f.label AS family_label, t.rank, t.is_label,
+                  t.lib, t.go_id, t.url, t.overlap, t.set_size, t.odds, t.q,
+                  t.overlap_tfs, f.n_programs, f.n_substantive, f.n_elements
+           FROM family_terms t
+           LEFT JOIN program_families f ON f.family = t.family
+           WHERE t.label = ?
+           ORDER BY t.q ASC""", [label]).df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
 def get_family_terms(family: int, limit: int = 25,
                      lib: str | None = None) -> pd.DataFrame:
     """All significant enrichments for a family, best evidence first.

@@ -9,7 +9,7 @@ from app.lib import db, plotting, ui, nav
 HIGHLIGHT_DEFAULT = ["CTCF", "YY1", "MYC", "SP1", "NRF1", "REST", "TBP", "EP300"]
 
 HELP_AGG = (
-    "Mean per-bp binding profile averaged across all ~19,700 canonical "
+    "Mean per-bp binding profile averaged across all 19,745 canonical "
     "protein-coding TSSs in the human genome (Ensembl GRCh38.114). For "
     "each TF, every chip-atlas peak's midpoint is recentered to a 25-nt "
     "block; the value at offset x is the fraction of TSSs with that TF's "
@@ -35,7 +35,7 @@ HELP_HEATMAP = (
 def render() -> None:
     ui.intro_card(
         title="Aggregate TF binding — the genome-wide baseline",
-        what="Mean binding profile of each TF across all ~19,700 canonical "
+        what="Mean binding profile of each TF across all 19,745 canonical "
              "protein-coding promoters. Position is transcription-oriented; "
              "0 = TSS.",
         objective="Establish the population-level pattern *before* "
@@ -96,7 +96,7 @@ def render() -> None:
     st.subheader("Aggregate TF binding around canonical TSSs",
                   help=HELP_AGG)
     st.caption(
-        "Mean per-bp binding profile across ~19,700 canonical protein-coding "
+        "Mean per-bp binding profile across 19,745 canonical protein-coding "
         "TSSs (Ensembl GRCh38.114). chip-atlas peaks recentered to a 25-nt "
         "block around their midpoint; ±1,000 bp window, txn-oriented."
     )

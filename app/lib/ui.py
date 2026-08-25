@@ -1,7 +1,33 @@
 """Small UI helpers shared across tabs."""
 from __future__ import annotations
 
+import re
+
 import streamlit as st
+
+
+# `**bold**`, `*italic*` and `` `code` `` written inside an intro card used to
+# reach the reader as literal asterisks. The card wraps its three strings in a
+# raw <div>, and CommonMark does not process markdown inside a block-level HTML
+# element -- so `st.markdown(..., unsafe_allow_html=True)` passed them straight
+# through. 14 spans across seven tabs read as `**140 programs**` on the live
+# site. Converting here rather than rewriting every string keeps markdown
+# working the way whoever writes the next card will expect.
+_MD_CODE   = re.compile(r"`([^`]+)`")
+_MD_BOLD   = re.compile(r"\*\*([^*]+)\*\*")
+_MD_ITALIC = re.compile(r"(?<!\*)\*([^*]+)\*(?!\*)")
+
+
+def md_inline(text: str) -> str:
+    """Inline markdown -> HTML, for strings destined for a raw HTML block.
+
+    Bold before italic, or `**x**` is eaten by the italic rule as an empty
+    emphasis wrapping `*x*`.
+    """
+    out = _MD_CODE.sub(r"<code>\1</code>", str(text))
+    out = _MD_BOLD.sub(r"<b>\1</b>", out)
+    out = _MD_ITALIC.sub(r"<i>\1</i>", out)
+    return out
 
 
 def intro_card(title: str, what: str,
@@ -17,9 +43,9 @@ def intro_card(title: str, what: str,
         st.markdown(f"#### {heading}")
         st.markdown(
             f"<div style='line-height:1.55'>"
-            f"<b>What you're seeing.</b> {what}<br>"
-            f"<b>Objective.</b> {objective}<br>"
-            f"<b>Why it matters.</b> {significance}"
+            f"<b>What you're seeing.</b> {md_inline(what)}<br>"
+            f"<b>Objective.</b> {md_inline(objective)}<br>"
+            f"<b>Why it matters.</b> {md_inline(significance)}"
             f"</div>",
             unsafe_allow_html=True,
         )

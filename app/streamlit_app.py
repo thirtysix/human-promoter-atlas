@@ -10,7 +10,7 @@ import streamlit as st
 # Make `app.*` importable when running `streamlit run app/streamlit_app.py`
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.lib import nav  # noqa: E402
+from app.lib import db, nav  # noqa: E402
 from app.tabs import (aggregate, programs, archetypes, go_search,  # noqa: E402
                        transcript, compare, tf, tf_network, methods)
 
@@ -22,7 +22,6 @@ DEFAULT_TF   = "CTCF"
 def _seed_from_query_params() -> None:
     """Read ?gene= / ?tf= / ?program= and seed selectbox state. Sets sane
     defaults so first-time visitors land on something interesting."""
-    from app.lib import db
     qp = st.query_params
 
     valid_genes = set(db.list_genes())
@@ -176,7 +175,9 @@ def main() -> None:
                                 url_path="aggregate", default=True),
         "programs":   st.Page(programs.render,   title="Programs & Modules",
                                 url_path="programs"),
-        "archetypes": st.Page(archetypes.render, title="Archetypes",
+        # The page has been Program families since gene-level archetypes were
+        # dropped. url_path stays "archetypes" so existing links still land.
+        "archetypes": st.Page(archetypes.render, title="Program families",
                                 url_path="archetypes"),
         "go_search":  st.Page(go_search.render,  title="GO search",
                                 url_path="go"),
@@ -203,10 +204,14 @@ def main() -> None:
         current_path = ""
     if current_path in ("", "aggregate"):
         st.title("Human Promoter Atlas")
+        # Counts from the manifest, not literals. These said "≈1,300 TFs"
+        # while the metaplot 600 px below was titled "Mean across 1793 TFs".
+        _f = db.build_facts()
         st.caption(
             "TF binding programs at canonical protein-coding TSSs of the "
             "human genome (Ensembl GRCh38.114). Built from chip-atlas peaks "
-            "across ≈1,300 TFs and ≈19,700 TSSs."
+            f"across {db.fmt_count(_f['n_tf'])} TFs and "
+            f"{db.fmt_count(_f['n_tss'])} TSSs."
         )
     else:
         st.markdown(

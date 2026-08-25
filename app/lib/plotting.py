@@ -1202,9 +1202,12 @@ def fig_depmap_lineage_bar(lineage_df: pd.DataFrame, gene: str) -> go.Figure:
         ),
         customdata=df[["n_lines", "frac_essential"]].values,
     ))
+    # "right" places the label OUTSIDE the plot, and the right margin is 20 px
+    # -- it rendered as "essi…". Inside the axes instead, which costs no canvas.
     fig.add_hline(y=-1.0, line_dash="dash", line_color="red", line_width=1,
-                   opacity=0.7,
-                   annotation_text="essential", annotation_position="right")
+                   opacity=0.7, annotation_text="essential",
+                   annotation_position="top right",
+                   annotation_font=dict(size=11, color="red"))
     fig.add_hline(y=0, line_color="black", line_width=0.5, opacity=0.4)
     fig.update_layout(
         title=f"{gene} — DepMap CRISPR essentiality (median Chronos per lineage)",

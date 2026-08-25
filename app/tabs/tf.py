@@ -15,7 +15,7 @@ HELP_TF = (
     "filtered-K8 / no-filter-K12 TF clustering, and where it binds most."
 )
 HELP_PROFILE = (
-    "Mean binary coverage probability for this TF across ~19,700 canonical "
+    "Mean binary coverage probability for this TF across 19,745 canonical "
     "protein-coding TSSs. The peak position tells you where this TF "
     "characteristically binds in the average promoter."
 )

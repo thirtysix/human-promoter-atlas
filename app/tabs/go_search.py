@@ -1,5 +1,18 @@
-"""GO-term reverse search: enter a biological process, see the programs,
-archetypes, and genes that enrich for it."""
+"""Reverse search: enter a biological process, see the program families that
+enrich for it and the TFs that carried the hit.
+
+Previously searched the k=10 promoter programs and the gene archetypes. Both
+are gone on this build -- `list_go_terms()` returned nothing and the page was
+a dead nav entry showing one warning. `family_terms` is the live equivalent:
+981 terms across 27 of the 28 families, every row FDR-backed.
+
+The unit changed with the layer, and honestly so. Program enrichment was over
+the GENES whose promoters a program dominated; family enrichment is over the
+FACTORS a family is built from. So the drill-down is "which TFs in this family
+are in the term", not "which genes drove it" -- and gene-level drill-down is
+not recoverable here, because gene identity carries no information about an
+element's program once distance is controlled.
+"""
 from __future__ import annotations
 
 import pandas as pd
@@ -9,341 +22,191 @@ from app.lib import db, ui, nav
 
 
 HELP_INTRO = (
-    "All foreground/background tests used the MSigDB c5.go.bp universe "
-    "(~18,000 genes) as the background, hypergeometric test + BH-FDR. "
-    "Only terms with at least one significant program-level or "
-    "archetype-level enrichment are searchable here."
+    "Enrichment is over each family's TF set against the MSigDB universe, "
+    "hypergeometric with BH-FDR. Only terms clearing FDR ≤ 0.05 in at least "
+    "one family are searchable, so every row here already cleared it — the "
+    "q column tells you by how much."
 )
 
-HELP_PROG_TBL = (
-    "Programs whose dominantly-assigned gene set is enriched for this GO BP "
-    "term. `OR` = odds ratio over the genome background; `fg/bg` is the "
-    "overlap size and the term's size in the background; `q` is BH-FDR "
-    "adjusted p."
+HELP_FAM_TBL = (
+    "Families whose TF set is enriched for this term. `hits/size` is the "
+    "overlap against the term's own size — 3/7 and 3/400 are very different "
+    "evidence for the same odds ratio. `headline` marks a family whose "
+    "displayed name came from this very term, rather than a term it merely "
+    "also hits."
 )
-
-HELP_ARCH_TBL = (
-    "Archetypes whose member gene set is enriched for this GO BP term. "
-    "Same statistic as the programs table."
-)
-
-HELP_GENES = (
-    "Union of `genes_in_overlap` across all programs/archetypes that hit "
-    "this term. Frequency = number of program+archetype hits the gene "
-    "contributed to. Click any gene to open its Per-transcript page."
-)
-
-
-def _pretty(term: str) -> str:
-    """GOBP_RIBOSOME_BIOGENESIS -> 'ribosome biogenesis'."""
-    return term.replace("GOBP_", "").replace("_", " ").lower()
 
 
 def render() -> None:
     ui.intro_card(
-        title="Reverse search by GO term",
-        what="Type a biological process (or pick from autocomplete) and "
-             "see every k=10 program + archetype enriched for it, plus "
-             "the genes that drove each hit.",
-        objective="Answer *'which regulatory programs implement this "
-                   "biology?'* — the inverse of the per-program / "
-                   "per-archetype views.",
-        significance="Natural entry point for visitors who know the "
-                      "biology but not the regulator: arrive with "
-                      "*'ribosome biogenesis'* or *'immune system'*, "
-                      "leave with P10 / A1 / a gene list to drill into.",
+        title="Reverse search by biological process",
+        what="Type a process and see every <b>program family</b> enriched "
+             "for it, with an FDR on each hit and the family TFs that "
+             "carried it.",
+        objective="Answer <i>which regulators implement this biology?</i> — "
+                   "the inverse of browsing families and reading their labels.",
+        significance="The entry point for arriving with the biology rather "
+                      "than the regulator. <i>Immune</i> returns 10 families; "
+                      "<i>response to growth factor</i> returns 13, led by "
+                      "MLL3/4 at odds 6.7.",
     )
 
-    terms_df = db.list_go_terms()
-    if terms_df.empty:
-        st.warning("No GO terms are loaded — the program/archetype "
-                    "enrichment tables appear empty.")
+    terms = db.list_family_go_terms()
+    if terms.empty:
+        st.info(
+            "No family enrichments are loaded. This page reads "
+            "`family_terms`, written by `pipeline/genome_family_labels.py`."
+        )
         return
-
-    # Pretty-name mapping (raw <-> display)
-    raw_to_pretty = dict(zip(terms_df["term"], terms_df["term"].map(_pretty)))
-    pretty_to_raw = {v: k for k, v in raw_to_pretty.items()}
 
     # ---- Search widget ---------------------------------------------------
     with st.container(border=True):
-        st.markdown("### Pick a GO BP term", help=HELP_INTRO)
-        # Seed from URL ?go= or session state
+        st.markdown("### Pick a process", help=HELP_INTRO)
         preset = st.session_state.get("go_search_preset", "")
-        options = [""] + sorted(pretty_to_raw)
-        default_idx = options.index(preset) if preset in pretty_to_raw else 0
+        labels = sorted(terms["label"])
+        lookup = {l.lower(): l for l in labels}
+        # ?go= arrives lowercased and underscore-stripped; match forgivingly
+        # rather than dropping a link on the floor.
+        seed = lookup.get(str(preset).strip().lower(), "")
+        options = [""] + labels
         choice = st.selectbox(
-            "Type to search (147 terms enriched somewhere in the atlas)",
+            f"Type to search ({len(labels):,} terms enriched in at least "
+            f"one family)",
             options=options,
-            index=default_idx,
-            placeholder="e.g. ribosome biogenesis, cell cycle, immune…",
+            index=options.index(seed) if seed in options else 0,
+            placeholder="e.g. immune, chromatin, cell fate commitment…",
             key="go_search_select",
-            help="Start typing — Streamlit filters in real-time.",
+            help="Start typing — Streamlit filters as you type.",
         )
 
-        # Top-of-table teaser when nothing selected
         if not choice:
-            st.markdown("**Most-shared terms** (high cross-program "
-                         "overlap = broadly used biology):")
-            teaser = terms_df.head(10).copy()
-            teaser["term"] = teaser["term"].map(_pretty)
+            st.markdown(
+                "**Most broadly shared** — terms that enrich across the most "
+                "families, i.e. biology many regulatory contexts touch:")
+            teaser = terms.head(12)
             st.dataframe(
-                teaser[["term", "go_id", "n_programs", "n_archetypes",
-                         "min_q"]],
+                teaser[["label", "lib", "go_id", "n_families", "min_q",
+                        "max_odds"]],
                 hide_index=True, width="stretch",
-                column_config={
-                    "term": st.column_config.TextColumn(
-                        "GO BP term",
-                        help="GO Biological Process term (prettified — "
-                             "GOBP_ prefix and underscores removed)."),
-                    "go_id": st.column_config.TextColumn(
-                        "GO ID",
-                        help="Gene Ontology canonical ID."),
-                    "n_programs":   st.column_config.NumberColumn(
-                        "# progs",
-                        help="# of the 10 programs that enrich for this "
-                             "GO term in their top-15 hits."),
-                    "n_archetypes": st.column_config.NumberColumn(
-                        "# arch",
-                        help="# archetypes that enrich for this GO term "
-                             "in their top-15 hits."),
-                    "min_q": st.column_config.NumberColumn(
-                        "best q-value", format="%.1e",
-                        help="Minimum BH-FDR q-value across all "
-                             "programs and archetypes that hit this term."),
-                },
+                column_config=_TERM_COLUMNS,
             )
-            st.info("Pick a term above to see which programs / archetypes / "
-                    "genes drive that enrichment.")
-            with st.container(border=True):
-                st.markdown("##### What you'll see once a term is selected")
-                p1, p2, p3 = st.columns(3)
-                with p1:
-                    st.markdown("**Programs that enrich**")
-                    st.caption("Which of the 10 k=10 programs hit this GO "
-                                "term in their top-15 enrichments — with "
-                                "OR, q-value, and a deep-link into Programs.")
-                with p2:
-                    st.markdown("**Archetypes that enrich**")
-                    st.caption("Which of the 8 archetypes are GO-hit by "
-                                "this term — same OR + q + deep-link, but "
-                                "at gene-level granularity.")
-                with p3:
-                    st.markdown("**Driver genes**")
-                    st.caption("The overlap genes that drove the hits — "
-                                "click any to jump to its Per-transcript "
-                                "view.")
+            st.info("Pick a term above to see which families enrich for it.")
             return
 
-    term = pretty_to_raw[choice]
-    st.session_state["go_search_preset"] = choice
+    _render_term(choice, terms)
 
-    # ---- Programs that enrich for this term ------------------------------
-    progs = db.programs_for_go_term(term)
-    archs = db.archetypes_for_go_term(term)
 
-    head_meta = terms_df.loc[terms_df["term"] == term].iloc[0]
-    st.markdown(
-        f"#### {_pretty(term)}  "
-        f"<span style='color:#888;font-weight:normal;font-size:0.85em'>"
-        f"· <code>{head_meta['go_id']}</code></span>",
-        unsafe_allow_html=True,
-    )
-    # Thin colored bar + three metric cards — matches the pattern used
-    # across the rest of the site (Per-transcript, Archetypes, Compare).
-    st.markdown(
-        "<div style='height:6px;background:#0b6e4f;"
-        "border-radius:3px;margin:6px 0 8px 0'></div>",
-        unsafe_allow_html=True,
-    )
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Programs hit", f"{len(progs)}",
-               help="# of the 10 k=10 programs whose top-15 GO BP "
-                    "enrichment includes this term.")
-    m2.metric("Archetypes hit", f"{len(archs)}",
-               help="# gene-level archetypes whose top-15 GO BP "
-                    "enrichment includes this term.")
-    m3.metric("Best q-value", f"{head_meta['min_q']:.1e}",
-               help="Minimum BH-FDR q-value across every program × "
-                    "term and archetype × term hit for this term.")
+_TERM_COLUMNS = {
+    "label": st.column_config.TextColumn(
+        "term", width="large",
+        help="MSigDB term, in its readable form."),
+    "lib": st.column_config.TextColumn(
+        "lib",
+        help="CC = cellular component (complexes), BP = biological process. "
+             "The families skew heavily BP; only 71 of 2,966 rows are CC."),
+    "go_id": st.column_config.TextColumn(
+        "GO ID", help="Gene Ontology accession."),
+    "n_families": st.column_config.NumberColumn(
+        "# families", format="%d",
+        help="How many of the 28 families enrich for this term. High = broad "
+             "biology touched by many regulatory contexts; 1 = specific."),
+    "min_q": st.column_config.NumberColumn(
+        "best q", format="%.1e",
+        help="Smallest BH-FDR across the families that hit this term."),
+    "max_odds": st.column_config.NumberColumn(
+        "best odds", format="%.2f",
+        help="Largest odds ratio across those families."),
+}
 
-    col_p, col_a = st.columns(2)
 
-    # ---- Programs panel --------------------------------------------------
-    with col_p:
-        with st.container(border=True):
-            st.markdown("### Programs", help=HELP_PROG_TBL)
-            if progs.empty:
-                st.info("No program-level enrichment for this term.")
-            else:
-                disp = progs.copy()
-                disp["bg"] = (disp["fg_in"].astype(str) + " / "
-                                + disp["set_size_in_bg"].astype(str))
-                disp = disp.rename(columns={"program": "P"})
-                st.dataframe(
-                    disp[["P", "rank", "odds_ratio", "q_value", "bg"]],
-                    hide_index=True, width="stretch",
-                    column_config={
-                        "P": st.column_config.NumberColumn(
-                            "program",
-                            help="Program id (1–10) that enriches for "
-                                 "this GO term."),
-                        "rank": st.column_config.NumberColumn(
-                            "rank",
-                            help="Rank of this term within the program's "
-                                 "top-15 GO hits."),
-                        "odds_ratio": st.column_config.NumberColumn(
-                            "OR", format="%.2f",
-                            help="Odds ratio of program-gene set "
-                                 "intersection with this GO term."),
-                        "q_value": st.column_config.NumberColumn(
-                            "q", format="%.1e",
-                            help="BH-FDR adjusted hypergeometric p-value."),
-                        "bg": st.column_config.TextColumn(
-                            "fg / bg",
-                            help="Foreground intersection / GO term size. "
-                                 "fg = # program genes annotated to term; "
-                                 "bg = total # MSigDB genes annotated."),
-                    },
-                )
-                _open_buttons("program", progs["program"].astype(int).tolist(),
-                              prefix="P", goto_page="programs")
+def _render_term(label: str, terms: pd.DataFrame) -> None:
+    fams = db.families_for_go_term(label)
+    row = terms[terms["label"] == label]
+    go_id = str(row["go_id"].iloc[0]) if len(row) else ""
+    raw = str(row["term"].iloc[0]) if len(row) else ""
 
-    # ---- Archetypes panel ------------------------------------------------
-    with col_a:
-        with st.container(border=True):
-            st.markdown("### Archetypes", help=HELP_ARCH_TBL)
-            if archs.empty:
-                st.info("No archetype-level enrichment for this term.")
-            else:
-                disp = archs.copy()
-                disp["bg"] = (disp["fg_in"].astype(str) + " / "
-                                + disp["set_size_in_bg"].astype(str))
-                disp = disp.rename(columns={"archetype": "A"})
-                st.dataframe(
-                    disp[["A", "rank", "odds_ratio", "q_value", "bg"]],
-                    hide_index=True, width="stretch",
-                    column_config={
-                        "A": st.column_config.NumberColumn(
-                            "archetype",
-                            help="Archetype id that enriches for this "
-                                 "GO term."),
-                        "rank": st.column_config.NumberColumn(
-                            "rank",
-                            help="Rank of this term within the "
-                                 "archetype's top-15 GO hits."),
-                        "odds_ratio": st.column_config.NumberColumn(
-                            "OR", format="%.2f",
-                            help="Odds ratio of archetype-gene set "
-                                 "intersection with this GO term."),
-                        "q_value": st.column_config.NumberColumn(
-                            "q", format="%.1e",
-                            help="BH-FDR adjusted hypergeometric p-value."),
-                        "bg": st.column_config.TextColumn(
-                            "fg / bg",
-                            help="Foreground intersection / GO term size."),
-                    },
-                )
-                _open_buttons("archetype",
-                              archs["archetype"].astype(int).tolist(),
-                              prefix="A", goto_page="archetypes")
+    if fams.empty:
+        st.warning(f"No family clears FDR for “{label}”.")
+        return
 
-    # ---- Genes panel -----------------------------------------------------
+    c1, c2, c3 = st.columns(3)
+    c1.metric("families enriched", f"{len(fams)}",
+              help="Of 28. A term hitting one family is specific to that "
+                   "regulatory context; a term hitting a dozen is biology "
+                   "many contexts touch.")
+    c2.metric("best FDR", f"{fams['q'].min():.1e}",
+              help="Smallest BH-FDR among the families below.")
+    c3.metric("term size", f"{int(fams['set_size'].iloc[0]):,} TFs",
+              help="How many TFs are in this MSigDB term overall. Read the "
+                   "per-family overlap against it.")
+
+    st.caption(f"`{raw}` · {go_id}")
+
     with st.container(border=True):
-        st.markdown("### Genes that drove these hits", help=HELP_GENES)
-        gene_freq: dict[str, int] = {}
-        for src in (progs, archs):
-            if src.empty:
-                continue
-            for s in src["genes_in_overlap"].fillna(""):
-                for g in (g.strip() for g in s.split(",")):
-                    if g:
-                        gene_freq[g] = gene_freq.get(g, 0) + 1
-        if not gene_freq:
-            st.info("No overlap genes recorded for this term.")
-            return
-        # Restrict to genes that exist in our canonical-transcript table
-        all_genes = set(db.list_genes())
-        rows = sorted(
-            ((g, n) for g, n in gene_freq.items() if g in all_genes),
-            key=lambda x: (-x[1], x[0]),
-        )
-        df = pd.DataFrame(rows, columns=["gene", "n_hits"])
-        st.caption(
-            f"{len(df)} unique gene{'s' if len(df) != 1 else ''} drove the "
-            f"{len(progs) + len(archs)} program/archetype hit"
-            f"{'s' if (len(progs)+len(archs)) != 1 else ''}. "
-            "Pick one to open its Per-transcript page."
-        )
-        # Show top N with hit-counts
-        top = df.head(40)
+        st.markdown("### Families enriched for this term", help=HELP_FAM_TBL)
+        show = fams.rename(columns={
+            "family_label": "family name", "is_label": "headline",
+            "overlap": "hits", "set_size": "term size",
+            "overlap_tfs": "overlap TFs", "n_programs": "programs"})
         st.dataframe(
-            top, hide_index=True, width="stretch",
+            show[["family", "family name", "headline", "hits", "term size",
+                  "odds", "q", "programs", "overlap TFs"]],
+            hide_index=True, width="stretch",
             column_config={
-                "gene": st.column_config.TextColumn(
-                    "gene symbol",
-                    help="Gene that contributed to one or more "
-                         "program/archetype × GO term overlaps."),
-                "n_hits": st.column_config.NumberColumn(
-                    "# (prog+arch) hits",
-                    help="In how many program-or-archetype hits this "
-                         "gene appears (as part of the overlap with "
-                         "the GO term). Higher = more central to the "
-                         "term's signal."),
+                "family": st.column_config.NumberColumn(
+                    "family", format="%d",
+                    help="Family number. Arbitrary — families are clusters, "
+                         "not a ranking."),
+                "family name": st.column_config.TextColumn(
+                    "family name", width="medium",
+                    help="The family's own headline label, which may be a "
+                         "different term from the one you searched."),
+                "headline": st.column_config.CheckboxColumn(
+                    "headline",
+                    help="Ticked when the family's displayed name came from "
+                         "THIS term. Unticked means the family hits the term "
+                         "but is named after something else."),
+                "hits": st.column_config.NumberColumn(
+                    "hits", format="%d",
+                    help="Family TFs that are in the term."),
+                "term size": st.column_config.NumberColumn(
+                    "term size", format="%d",
+                    help="TFs in the term overall. Read with `hits` — 3/7 and "
+                         "3/400 are not the same evidence."),
+                "odds": st.column_config.NumberColumn(
+                    "odds", format="%.2f",
+                    help="Odds ratio of the overlap."),
+                "q": st.column_config.NumberColumn(
+                    "q", format="%.1e",
+                    help="BH-FDR. Everything listed cleared 0.05."),
+                "programs": st.column_config.NumberColumn(
+                    "programs", format="%d",
+                    help="How many of the 140 programs are in this family."),
+                "overlap TFs": st.column_config.TextColumn(
+                    "overlap TFs", width="large",
+                    help="Which family members are in the term — the "
+                         "evidence behind the row, so a 3/7 hit can be "
+                         "judged rather than taken on trust."),
             },
         )
-        # Quick-open: gene selectbox + button
-        pick = st.selectbox(
-            "Open a gene:", options=[""] + df["gene"].tolist(),
-            index=0, key=f"go_gene_open_{term}",
-            placeholder="Type to search…",
-            help="Jumps to the Per-transcript page for the selected "
-                 "gene with the gene preselected.",
+
+        st.markdown("**Open a family**")
+        ids = [int(f) for f in fams["family"].head(8)]
+        cols = st.columns(min(len(ids), 4))
+        for i, fid in enumerate(ids):
+            name = str(fams.loc[fams.family == fid, "family_label"].iloc[0])
+            with cols[i % len(cols)]:
+                if st.button(f"Family {fid} — {name[:28]}",
+                              key=f"go_open_fam_{fid}",
+                              width="stretch"):
+                    st.session_state["fam_pick"] = fid
+                    nav.goto("archetypes")
+
+    with st.expander("Download", expanded=False):
+        st.download_button(
+            f"Families enriched for “{label}” — TSV",
+            data=fams.to_csv(sep="\t", index=False).encode(),
+            file_name=f"families_{go_id or label.replace(' ', '_')}.tsv",
+            mime="text/tab-separated-values",
+            key=f"go_dl_fams_{label}",
         )
-        if pick:
-            st.session_state["tx_gene_select"] = pick
-            nav.goto("transcript")
-
-    # ---- Downloads --------------------------------------------------------
-    with st.expander("Download data", expanded=False):
-        if not progs.empty:
-            st.download_button(
-                f"Programs hit by `{term}` — TSV",
-                data=progs.to_csv(sep="\t", index=False).encode(),
-                file_name=f"go_{term}_programs.tsv",
-                mime="text/tab-separated-values",
-                key=f"go_dl_progs_{term}",
-            )
-        if not archs.empty:
-            st.download_button(
-                f"Archetypes hit by `{term}` — TSV",
-                data=archs.to_csv(sep="\t", index=False).encode(),
-                file_name=f"go_{term}_archetypes.tsv",
-                mime="text/tab-separated-values",
-                key=f"go_dl_archs_{term}",
-            )
-        if not df.empty:
-            st.download_button(
-                f"Genes driving `{term}` hits — TSV",
-                data=df.to_csv(sep="\t", index=False).encode(),
-                file_name=f"go_{term}_genes.tsv",
-                mime="text/tab-separated-values",
-                key=f"go_dl_genes_{term}",
-            )
-
-
-def _open_buttons(kind: str, ids: list[int], prefix: str,
-                   goto_page: str) -> None:
-    """Render a row of small buttons that jump to the target page with the
-    given program/archetype preselected."""
-    if not ids:
-        return
-    cols = st.columns(min(len(ids), 5))
-    for i, pid in enumerate(ids):
-        with cols[i % len(cols)]:
-            if st.button(f"Open {prefix}{pid} →",
-                          key=f"go_open_{kind}_{pid}",
-                          use_container_width=True):
-                if kind == "program":
-                    st.session_state["prog_pick"] = int(pid)
-                # archetype selection is local to its tab; no global key
-                nav.goto(goto_page)
