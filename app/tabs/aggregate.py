@@ -56,11 +56,15 @@ def render() -> None:
                  "switch to that tab to see the result.",
         )
         c1, c2, c3, c4 = st.columns(4)
-        if c1.button("GAPDH (10 modules, 8 programs)",
+        # No hard-coded counts on these labels. "GAPDH (10 modules, 8
+        # programs)" survived a rebuild that left the gene with 9 modules and
+        # 6 programs, and a wrong number on the first thing a visitor clicks
+        # is worse than no number.
+        if c1.button("GAPDH — a multi-module housekeeping promoter",
                       width="stretch",
-                      help="The textbook multi-modular housekeeping gene — "
-                           "every k=10 program except P9 is represented at "
-                           "this TSS."):
+                      help="The textbook case: several distinct modules across "
+                           "one promoter, each drawing a different set of "
+                           "factors."):
             st.session_state["tx_gene_select"] = "GAPDH"
             nav.goto("transcript")
         if c2.button("ESR1 (hormone receptor)",
@@ -69,19 +73,24 @@ def render() -> None:
                            "responsive program composition."):
             st.session_state["tx_gene_select"] = "ESR1"
             nav.goto("transcript")
-        if c3.button("CTCF (the two-program TF)",
+        if c3.button("CTCF — cohesin at the TSS",
                       width="stretch",
-                      help="CTCF appears in both P5 (cohesin near TSS) and "
-                           "P1 (chromatin downstream) — same factor, two "
-                           "roles, separated by NMF."):
+                      help="CTCF's loading is concentrated almost entirely on "
+                           "one genome program, alongside RAD21 and STAG1 — "
+                           "the mitotic cohesin family, recovered without "
+                           "any complex annotation."):
             st.session_state["tf_select"] = "CTCF"
             nav.goto("tf")
-        if c4.button("A6 (cohesin → adhesion)",
+        # Was "A6 (cohesin → adhesion)": an archetype that no longer exists,
+        # whose help described k=10 P5, and which actually landed on program
+        # 5 -- a histone deacetylase program in the current numbering.
+        if c4.button("PRC2 — a complex found, not told",
                       width="stretch",
-                      help="The archetype where P5 dominates — its genes "
-                           "light up homophilic cell-cell adhesion at "
-                           "OR=7.5 (protocadherin / cohesin-anchored)."):
-            st.session_state["preselected_program"] = 5
+                      help="Program 12: EZH2, JARID2 and SUZ12 load together "
+                           "across 11,573 elements at seed stability 0.978. "
+                           "No complex annotation enters the pipeline — the "
+                           "factorization put them together on its own."):
+            st.session_state["prog_pick"] = 12
             nav.goto("programs")
 
     st.subheader("Aggregate TF binding around canonical TSSs",

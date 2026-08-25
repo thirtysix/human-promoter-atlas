@@ -34,13 +34,32 @@ HELP_PROG_CARDS = (
 )
 
 
+def _with_genome_annotation(modules_df, transcript_id: str):
+    """Add `genome_program` / `family` to the promoter modules.
+
+    Modules carry no program of their own on this build; they inherit one from
+    the genome element at the same locus. A module below the genome support
+    floor of 11 assigned TFs has no matching element, so the columns stay NA
+    and the band falls back to neutral -- which is the honest rendering of
+    "no program evidence here".
+    """
+    if modules_df is None or modules_df.empty:
+        return modules_df
+    ann = db.get_module_annotation(transcript_id)
+    if ann is None or ann.empty or "module_id" not in ann.columns:
+        return modules_df
+    keep = ann[["module_id", "program", "family", "family_label"]].rename(
+        columns={"program": "genome_program"})
+    return modules_df.merge(keep, on="module_id", how="left")
+
+
 def render() -> None:
     ui.intro_card(
         title="Per-transcript view — what's happening at this promoter",
         what="The full module decomposition of a single canonical promoter: "
              "smoothed density of TF binding, every individual TF binding "
              "within ±1.5 kb at the assignment score, and the modules detected from "
-             "that density — each colored by its dominant k=10 program.",
+             "that density — each colored by the program family it inherits from the genome layer.",
         objective="Answer 'what TFs control THIS gene, in what positions, "
                    "and which of the 10 archetypal programs do they "
                    "implement?' for any canonical protein-coding transcript.",
@@ -166,7 +185,7 @@ def render() -> None:
     with st.container(border=True):
         st.markdown(
             "**Promoter map** — KDE density of TF binding, individual TF "
-            "rugs, and modules colored by their dominant k=10 program.",
+            "rugs, and modules colored by their program family.",
             help="Top: smoothed density of distinct-TF binding (each TF "
                  "contributes mass = 1 per TSS). Middle: one row per TF "
                  "with peak midpoints as vertical ticks (upstream TFs at "
@@ -212,6 +231,11 @@ def render() -> None:
                      "density and module rows are unaffected.",
             )
 
+        # The figure colours module bands by their genome-layer family, so
+        # the annotation has to travel with the modules. Without it every
+        # band fell back to neutral grey while three captions promised
+        # colour-coding.
+        modules_df = _with_genome_annotation(modules_df, tx_id)
         gs = db.get_gene_structure(str(tss_meta["chrom"]), int(tss_meta["tss"]),
                                    str(tss_meta["strand"]),
                                    gene_name=str(tss_meta.get("gene_name") or ""))
@@ -274,7 +298,7 @@ def render() -> None:
                      "hot cells under tall bars = a tissue where both the "
                      "transcript itself and a module's TFs are highly "
                      "expressed. Module-row labels are colored by the "
-                     "module's dominant k=10 program, matching the "
+                     "module's program family, matching the "
                      "promoter map above.",
             )
             stats    = db.gtex_transcript_stats(tx_id)
@@ -857,7 +881,7 @@ def _render_program_card(program: int, reading: str, n_modules: int) -> None:
                       key=f"open_p{program}",
                       help="Switches to the Programs & Modules page with "
                            "this program preselected."):
-            st.session_state["preselected_program"] = program
+            st.session_state["prog_pick"] = program
             nav.goto("programs")
 
 

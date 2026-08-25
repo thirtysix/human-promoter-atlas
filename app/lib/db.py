@@ -474,6 +474,27 @@ def get_tf_program_loadings(tf: str) -> pd.DataFrame:
     ).df()
 
 
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def n_bound_tss_core(tf: str, half: int = 100) -> Optional[int]:
+    """Canonical TSSs this TF binds within +/-`half` bp of the TSS.
+
+    The `tf.n_bound_tss_core` column exists but the build never fills it -- it
+    is NULL for all 1,793 TFs -- and the Per-TF metric rendered it as
+    `int(... or 0)`, so every page reported that CTCF binds 0 TSSs while also
+    reporting its 65 million peaks. Computing it takes ~0.06 s against the
+    peaks table, so there is no reason to show a stored NULL as a zero.
+    """
+    try:
+        n = get_con().execute(
+            f"""SELECT COUNT(DISTINCT p.tss_id) FROM {peaks_source()} p
+                JOIN tf ON p.tf_idx = tf.tf_idx
+                WHERE tf.tf = ? AND p.score >= ? AND ABS(p.local_offset) <= ?""",
+            [tf, min_score_assign(), int(half)]).fetchone()[0]
+        return int(n)
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_top_tss_for_tf(tf: str, limit: int = 100) -> pd.DataFrame:
     """TSSs with the most assigned-score peaks for this TF."""
@@ -1524,6 +1545,32 @@ def get_genome_program_tfs(program: int, limit: int = 30) -> pd.DataFrame:
     return get_con().execute(
         "SELECT rank, tf, loading FROM genome_program_tf_top "
         "WHERE program = ? ORDER BY rank LIMIT ?", [program, limit]).df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_tf_genome_program_loadings(tf: str, limit: int = 12) -> pd.DataFrame:
+    """Which genome programs this TF loads on, strongest first.
+
+    The inverse of get_genome_program_tfs, and the replacement for the k=10
+    promoter version: that one returns nothing on this build, so the Per-TF
+    card was telling every visitor the TF "is not in the top-30 of any k=10
+    program" -- a claim about the TF, when the truth was that no k=10 programs
+    exist here.
+
+    genome_program_tf_top holds the top 30 TFs of each program, so a TF that
+    never reaches any program's top 30 is genuinely absent: 757 of the 1,793
+    are. For those the empty result is now a fact about the TF again, which is
+    what the card's message claims.
+    """
+    return get_con().execute(
+        """SELECT t.program, t.rank, t.loading,
+                  p.family, f.label AS family_label, p.substantive
+           FROM genome_program_tf_top t
+           JOIN genome_programs p ON p.program = t.program
+           LEFT JOIN program_families f ON f.family = p.family
+           WHERE t.tf = ?
+           ORDER BY t.loading DESC
+           LIMIT ?""", [tf, limit]).df()
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)

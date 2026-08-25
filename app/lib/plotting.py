@@ -624,6 +624,25 @@ def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "",
     return max(0, n_total - len(seen)), cue
 
 
+def _module_colour(m) -> str:
+    """Fill for one module's band.
+
+    Prefers the genome layer's family, which is what this build actually
+    assigns: `dominant_program` comes from the promoter factorization and is
+    NULL throughout, so colouring on it alone painted every module the same
+    neutral grey while the captions promised colour-coding. Family rather than
+    program because 140 programs cannot be told apart by hue, and because the
+    families are the vocabulary the rest of the site browses by.
+    """
+    fam = m.get("family")
+    if pd.notna(fam):
+        return FAMILY_COLORS[int(fam) % len(FAMILY_COLORS)]
+    raw = m.get("dominant_program")
+    if pd.notna(raw):
+        return PROGRAM_COLORS[(int(raw) - 1) % len(PROGRAM_COLORS)]
+    return REFERENCE
+
+
 def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
                         tss_meta: dict,
                         score_range: tuple[int, int] = (500, 1000),
@@ -714,7 +733,7 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
     if has_gs:
         titles.append(_structure_title())
     titles += [rug_title,
-              "all modules — colored by k=10 dominant program"]
+              "all modules — colored by program family"]
     titles += [f"P{p} only — {prog_reading.get(p, '')}" for p in program_rows]
 
     # Figure height first, because the row gap depends on it.
@@ -747,9 +766,7 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
         # dominant_program is NULL when programs come from the genome layer
         # rather than a promoter factorization. int(NA) raises and would take
         # the whole profile down, so an unassigned module shades neutrally.
-        raw = m.get("dominant_program")
-        fillcolor = (PROGRAM_COLORS[(int(raw) - 1) % len(PROGRAM_COLORS)]
-                     if pd.notna(raw) else REFERENCE)
+        fillcolor = _module_colour(m)
         # Span EVERY row, not just the density. With shared_xaxes the bands
         # line up down the whole figure, so a module's extent can be read
         # against the transcript structure, the TF rug and the program rows at
@@ -888,9 +905,7 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
     # honest fix: it does not depend on remembering the flag, and any row that
     # genuinely has no traces should not get a band anyway.
     for _, m in modules_df.iterrows():
-        raw = m.get("dominant_program")
-        band = (PROGRAM_COLORS[(int(raw) - 1) % len(PROGRAM_COLORS)]
-                if pd.notna(raw) else REFERENCE)
+        band = _module_colour(m)
         for _r in range(2, n_rows + 1):
             fig.add_vrect(
                 x0=m["lo_offset"], x1=m["hi_offset"], fillcolor=band,
@@ -910,11 +925,18 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
     fig.add_vline(x=0, line_dash="dash", line_color="red", line_width=1,
                    opacity=0.7, row="all")
 
+    # n_prog counts the PROMOTER program rows, which are absent on this build
+    # -- reporting it read as "0 programs present" on every gene that in fact
+    # carries several. Count what the modules are actually annotated with.
+    if "genome_program" in modules_df.columns:
+        n_present = int(modules_df["genome_program"].dropna().nunique())
+    else:
+        n_present = n_prog
     title = (f"<b>{tss_meta.get('gene_name','?')}</b>  "
              f"({tss_meta.get('transcript_id','?')})  •  "
              f"chr{tss_meta.get('chrom','?')}:{tss_meta.get('tss','?')} "
              f"({tss_meta.get('strand','?')})  •  "
-             f"{n_prog} program{'s' if n_prog != 1 else ''} present "
+             f"{n_present} program{'s' if n_present != 1 else ''} present "
              f"({len(modules_df)} module{'s' if len(modules_df) != 1 else ''})")
 
     fig.update_layout(
@@ -1341,22 +1363,56 @@ def fig_tf_aggregate_profile(matrix: pd.DataFrame, tf: str,
     return fig
 
 
-def fig_tf_program_loadings(loadings_df: pd.DataFrame, tf: str) -> go.Figure:
-    """Bar of this TF's loading across the 10 programs."""
-    df = loadings_df.set_index("program").reindex(range(1, 11)).reset_index()
-    df["loading"] = df["loading"].fillna(0.0)
+# A TF's loading is concentrated, not spread: NMF drives components onto
+# largely disjoint TF sets, so CTCF sits at 5.77 on one program and below 0.07
+# on every other. Programs under this fraction of the TF's own maximum are
+# dropped rather than drawn as slivers -- the concentration is the finding,
+# and a row of invisible bars does not show it.
+LOADING_FLOOR_FRAC = 0.01
+
+
+def fig_tf_genome_program_loadings(df: pd.DataFrame, tf: str) -> go.Figure:
+    """This TF's loading across the genome programs it reaches, strongest first.
+
+    Horizontal, because the labels carry the family name -- "P120 — Mitotic
+    cohesin complex" says something a bare "P120" does not, and it ties the
+    bar to the Program families page.
+    """
+    if df.empty:
+        return go.Figure()
+    top = float(df["loading"].max())
+    keep = df[df["loading"] >= top * LOADING_FLOOR_FRAC].copy()
+    n_drop = len(df) - len(keep)
+    keep = keep.iloc[::-1]                      # lane 0 is the BOTTOM of a y-axis
+    labels = [
+        f"P{int(r.program)} — {r.family_label}" if pd.notna(r.family_label)
+        else f"P{int(r.program)}"
+        for _, r in keep.iterrows()
+    ]
+    colours = [FAMILY_COLORS[int(r.family) % len(FAMILY_COLORS)]
+               if pd.notna(r.family) else REFERENCE
+               for _, r in keep.iterrows()]
     fig = go.Figure(go.Bar(
-        x=[f"P{p}" for p in df["program"]],
-        y=df["loading"],
-        marker_color=[PROGRAM_COLORS[(int(p) - 1) % 10] for p in df["program"]],
-        hovertemplate="%{x}<br>H loading: %{y:.3f}<br>rank: %{customdata}<extra></extra>",
-        customdata=df["rank"].fillna("—"),
+        x=keep["loading"], y=labels, orientation="h",
+        marker_color=colours,
+        customdata=np.stack([keep["rank"],
+                             np.where(keep["substantive"].astype(bool),
+                                      "substantive", "not substantive")], axis=-1),
+        hovertemplate=("%{y}<br>H loading: %{x:.3f}<br>"
+                        "rank %{customdata[0]} in that program<br>"
+                        "%{customdata[1]}<extra></extra>"),
     ))
+    title = f"{tf} — loading across genome programs"
+    if n_drop:
+        title += f"  ({n_drop} more below 1% of the top)"
     fig.update_layout(
-        title=f"{tf} — loading across k=10 programs",
-        xaxis_title="program", yaxis_title="H loading",
-        height=220, margin=dict(l=60, r=20, t=50, b=40),
+        title=title,
+        xaxis_title="H loading", yaxis_title="",
+        height=max(200, 46 * len(keep) + 90),
+        margin=dict(l=10, r=20, t=50, b=40),
+        showlegend=False,
     )
+    fig.update_yaxes(automargin=True, tickfont=dict(size=11))
     return fig
 
 

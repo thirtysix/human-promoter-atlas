@@ -11,7 +11,7 @@ from app.lib import db, plotting, ui
 
 HELP_TF = (
     "Pick a TF (chip-atlas) to see its profile across all canonical TSSs, "
-    "which k=10 programs it participates in, its membership in the "
+    "which genome programs it participates in, its membership in the "
     "filtered-K8 / no-filter-K12 TF clustering, and where it binds most."
 )
 HELP_PROFILE = (
@@ -20,9 +20,12 @@ HELP_PROFILE = (
     "characteristically binds in the average promoter."
 )
 HELP_LOADINGS = (
-    "How heavily this TF loads on each of the 10 programs in the NMF H "
-    "matrix (top-30-per-program subset). A TF can load on multiple programs "
-    "if it participates in multiple regulatory contexts."
+    "How heavily this TF loads on each genome program it reaches, from the "
+    "NMF H matrix (top-30-per-program subset, so a TF that never reaches any "
+    "program's top 30 does not appear — 757 of the 1,793 do not). Loadings "
+    "are concentrated rather than spread: NMF drives components onto largely "
+    "disjoint TF sets, so most TFs sit high on one program and near zero on "
+    "the rest. Each bar is labelled with its program's family."
 )
 HELP_CLUSTERS = (
     "TF clusters were computed by hierarchical (Ward / Euclidean) clustering "
@@ -40,17 +43,17 @@ def render() -> None:
     ui.intro_card(
         title="Per-TF view — what does this transcription factor do?",
         what="Everything the atlas knows about one TF: aggregate binding "
-             "profile, loading on each k=10 program, TF-cluster membership "
+             "profile, loading on each genome program, TF-cluster membership "
              "(K=8 / K=12 hierarchical), DepMap essentiality, GTEx "
              "expression, top co-binding partners, and top bound TSSs.",
         objective="Trace a TF's role through the regulatory hierarchy: "
                    "raw peaks → mean-of-promoters profile → NMF programs "
                    "→ co-binding partners → target genes.",
-        significance="Many TFs participate in more than one program — CTCF "
-                      "loads on two (cohesin-anchored at TSS *and* "
-                      "chromatin-anchored downstream); EP300 spans several. "
-                      "The program-loading bar makes this multi-role "
-                      "behavior explicit.",
+        significance="Loadings are concentrated, not spread: NMF drives "
+                      "components onto largely disjoint TF sets, so CTCF "
+                      "sits at 5.77 on the mitotic-cohesin program and below "
+                      "0.07 on every other. Where that concentration lands "
+                      "names the complex a factor works in.",
     )
 
     st.subheader("Per-TF view", help=HELP_TF)
@@ -83,8 +86,10 @@ def render() -> None:
                   help="Peaks across all chip-atlas experiments aggregated "
                        "for this TF that fall on standard chromosomes after "
                        "25-nt recentering.")
+        # Computed, not read from tf.n_bound_tss_core: that column is NULL
+        # for every TF, and `or 0` turned the NULL into a displayed zero.
         c2.metric(f"Bound TSSs (score≥{db.min_score_assign()}, ±100 bp core)",
-                  f"{int(meta.get('n_bound_tss_core') or 0):,}",
+                  db.fmt_count(db.n_bound_tss_core(tf), unknown="—"),
                   help="Number of canonical TSSs this TF binds at the core "
                        f"promoter (±100 bp) with at least one score≥{db.min_score_assign()} peak.")
         c3.metric("Cluster (filtered K=8)",
@@ -164,17 +169,23 @@ def render() -> None:
 
     with load_col:
         with st.container(border=True):
-            st.markdown("#### Loading on each k=10 program",
+            st.markdown("#### Loading on each genome program",
                          help=HELP_LOADINGS)
-            loadings = db.get_tf_program_loadings(tf)
+            # Was the k=10 promoter factorization, which returns nothing on
+            # this build -- so every visitor was told the TF "is not in the
+            # top-30 of any k=10 program", a claim about the TF rather than
+            # about the missing layer. Against the genome layer the same
+            # sentence is true again for the TFs it applies to.
+            loadings = db.get_tf_genome_program_loadings(tf)
             if loadings.empty:
-                st.info(f"{tf} is not in the top-30 of any k=10 program "
-                        f"(its loadings across programs are below that "
-                        f"cutoff).")
+                st.info(f"{tf} does not reach the top 30 of any of the "
+                        f"140 genome programs. That is true of 757 of the "
+                        f"1,793 TFs in the atlas — it binds, but never "
+                        f"strongly enough to define a program.")
             else:
                 st.plotly_chart(
-                    plotting.fig_tf_program_loadings(loadings, tf),
-                    width="stretch",
+                    plotting.fig_tf_genome_program_loadings(loadings, tf),
+                    width="stretch", theme=None,
                 )
 
     # ---- DepMap essentiality ----------------------------------------------

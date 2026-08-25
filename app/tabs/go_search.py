@@ -344,6 +344,6 @@ def _open_buttons(kind: str, ids: list[int], prefix: str,
                           key=f"go_open_{kind}_{pid}",
                           use_container_width=True):
                 if kind == "program":
-                    st.session_state["preselected_program"] = int(pid)
+                    st.session_state["prog_pick"] = int(pid)
                 # archetype selection is local to its tab; no global key
                 nav.goto(goto_page)

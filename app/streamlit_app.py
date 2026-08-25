@@ -39,14 +39,20 @@ def _seed_from_query_params() -> None:
             tf_q if tf_q in valid_tfs else DEFAULT_TF
         )
 
+    # Seed the Programs selectbox DIRECTLY. This used to write a separate
+    # `preselected_program` key that only _sync_query_params ever read -- it
+    # went straight back into the URL and never reached the widget, so
+    # ?program=7 rendered program 1 under a URL that still claimed 7. One key,
+    # one meaning. The bound was also a literal 1..10 from the k=10 build,
+    # which made programs 11..140 unbookmarkable; it now comes from the data.
     program = qp.get("program", "")
-    if program and "preselected_program" not in st.session_state:
+    if program and "prog_pick" not in st.session_state:
         try:
             p = int(program)
-            if 1 <= p <= 10:
-                st.session_state["preselected_program"] = p
         except (ValueError, TypeError):
-            pass
+            p = None
+        if p is not None and p in set(db.get_genome_programs()["program"]):
+            st.session_state["prog_pick"] = p
 
     go_q = qp.get("go", "")
     if go_q and "go_search_preset" not in st.session_state:
@@ -61,7 +67,7 @@ def _sync_query_params() -> None:
     qp = st.query_params
     g = st.session_state.get("tx_gene_select") or ""
     t = st.session_state.get("tf_select") or ""
-    p = st.session_state.get("preselected_program")
+    p = st.session_state.get("prog_pick")
     new = {}
     if g and g != DEFAULT_GENE:
         new["gene"] = g
