@@ -114,8 +114,15 @@ def fig_aggregate_heatmap(matrix: pd.DataFrame, label: str,
     # else: total_signal (already done)
 
     vmax = float(np.quantile(M.values, 0.99))
+    # float32 on the wire. Plotly serialises z as a base64 TYPED ARRAY
+    # ("dtype":"f8"), not as decimal text, so rounding buys nothing and the
+    # dtype is the whole cost: 200 x 2,001 float64 is a 5.1 MB payload sent
+    # to every browser. The values are colour-mapped between 0 and the 99th
+    # percentile and hovered at 4 decimals, so float32's ~7 significant
+    # digits is far more than is visible. vmax stays float64 -- it is one
+    # number and it sets the scale.
     fig = go.Figure(data=go.Heatmap(
-        z=M.values, x=M.columns.values, y=M.index.tolist(),
+        z=M.values.astype(np.float32), x=M.columns.values, y=M.index.tolist(),
         colorscale=colorscale, zmin=0, zmax=vmax,
         colorbar=dict(title=label, thickness=12),
         hovertemplate="TF: %{y}<br>bp: %{x}<br>signal: %{z:.4f}<extra></extra>",
