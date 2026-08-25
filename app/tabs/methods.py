@@ -36,15 +36,29 @@ GLOSSARY = [
      "found as a peak in the per-TSS KDE density (σ = 25 bp). A module is "
      "supported by ≥2 distinct TFs (any score) and is assigned the TFs that "
      "have ≥1 peak with score ≥ {thr} inside its boundaries."),
+    ("Element",
+     "A local concentration of distinct-TF binding found anywhere in the "
+     "genome, by the same KDE procedure as a module but without a promoter "
+     "window. Supported by ≥11 distinct TFs — a floor calibrated against a "
+     "circular-shift null. Most are distal: 353,550 of the 467,223 sit "
+     "outside any ±1.5 kb promoter window."),
     ("Program",
-     "An NMF component over the [n_module × n_TF] occupancy matrix. We chose "
-     "k=10 by ARI stability + Brunet cophenetic correlation (both peaked at "
-     "k=10). Each program has a TF signature (its top loadings in H) and a "
-     "characteristic position relative to the TSS."),
-    ("program_path",
-     "An ordered list of dominant programs across a gene's modules, "
-     "transcription-direction. e.g. `9,7,5,1` reads as 'NFY/Sp upstream → PIC "
-     "at core → cohesin → downstream chromatin'."),
+     "An NMF component over the [n_element × n_TF] occupancy matrix. The rank "
+     "is chosen by held-out imputation cross-validation with a "
+     "one-standard-error rule. Each program has a TF signature (its top "
+     "loadings in H) and a characteristic distance distribution relative to "
+     "the nearest TSS."),
+    ("Substantive",
+     "A program with ≥100 elements AND seed stability ≥0.90. Size alone is "
+     "not enough and stability alone is not either: a program pinned to a "
+     "handful of elements reconverges perfectly across seeds and would "
+     "otherwise read as highly reproducible."),
+    ("Family",
+     "A group of programs that mark the same PLACES, found by co-occurrence "
+     "across elements rather than by shared TFs. Grouping on composition does "
+     "not work here — PRC2 and PRC1.1 have a TF-loading cosine of 0.009 — so "
+     "a family can look heterogeneous and still be one thing. Each is named "
+     "by MSigDB enrichment with an FDR behind the label."),
     ("KDE",
      "Kernel Density Estimation — a smoothed 1-D density built from "
      "individual peak midpoints. We use a Gaussian kernel with σ = 25 bp, "
@@ -64,7 +78,8 @@ def pipeline(f: dict) -> list[tuple[str, str, str]]:
     score = f["min_score_assign"]
     n_mod = db.fmt_count(f["n_modules"])
     n_tf = db.fmt_count(f["n_tf"])
-    k = f["k_canonical"] if f["k_canonical"] is not None else "?"
+    k = db.fmt_count(f.get("n_programs_served"))
+    n_el = db.fmt_count(_n_elements())
     return _PIPELINE_HEAD + [
         ("4. Per-gene modules",
          "tss_modules.001.py",
@@ -72,11 +87,39 @@ def pipeline(f: dict) -> list[tuple[str, str, str]]:
          "find_peaks → module centers, walk-out boundary detection, ≥2-TF "
          f"support filter, score ≥ {score if score is not None else '?'} for "
          "binary occupancy assignment."),
-        ("5. NMF on modules",
-         "tss_modules_select_k.001.py + tss_modules_k10.py",
-         f"20-seed ARI + 5,000-module Brunet cophenetic to pick k={k}. NMF (MU "
-         f"solver, random init) on the {n_mod} × {n_tf} sparse binary matrix → "
-         "W (modules × programs), H (programs × TFs)."),
+        ("5. Genome-wide elements",
+         "genome_modules.py + genome_support_null.py",
+         f"The same KDE procedure run across the genome rather than only in "
+         f"promoter windows, giving {n_el} annotation-free elements. The "
+         "support floor of 11 distinct TFs is calibrated against a "
+         "circular-shift null: the old floor of 2 carries a genome-wide FDR "
+         "of 3.83, because the null produces four times more 2-TF elements "
+         "than the real data."),
+        ("6. Choosing the rank",
+         "nmf_holdout_cv.py",
+         f"Held-out imputation cross-validation with a one-standard-error "
+         f"rule picks k={k}; the RMSE minimum agrees. Split-half replication "
+         "is run as a VALIDATION, not a selector — it rises monotonically "
+         "toward triviality (56.4% at k=250), so selecting on it would "
+         "choose the largest k offered."),
+        ("7. Factorization",
+         "genome_programs.py + genome_splithalf.py",
+         f"Masked NMF on the {n_el} × {n_tf} element × TF matrix → W "
+         "(elements × programs), H (programs × TFs). 72 of the components are "
+         "substantive (≥100 elements, seed stability ≥0.90) and 64 replicate "
+         "across disjoint experiments."),
+        ("8. Program families",
+         "genome_program_families.py + genome_family_labels.py",
+         "The programs are grouped into 28 families by CO-OCCURRENCE across "
+         "elements, not by shared TFs: NMF drives components onto disjoint "
+         "factor sets, so PRC2 and PRC1.1 have a TF-loading cosine of 0.009 "
+         "while marking the same places. Each family is named by MSigDB "
+         "enrichment with an FDR on every label."),
+        ("9. Regression gate",
+         "genome_promoter_regression.py",
+         "Checks the two layers agree where they overlap: 98.2% of comparable "
+         "promoter modules are recovered by promoter-stratum elements at a "
+         "12 bp median offset, half the 25 bp recentering bin."),
     ] + _PIPELINE_TAIL
 
 
@@ -88,7 +131,7 @@ _PIPELINE_HEAD = [
     ("2. TF clustering",
      "cluster_tfs.001.py / cluster_tfs.no_filter.001.py",
      "Ward + Euclidean on each TF's peak-normalized aggregate profile shape. "
-     "Produces 8 clusters (filtered, 184 TFs) and 12 (no_filter, 1,207 TFs)."),
+     "Produces 8 clusters (filtered, 855 TFs) and 12 (no_filter, 1,771 TFs)."),
     ("3. TF-cluster GO BP",
      "enrich_clusters_msigdb.001.py",
      "Hypergeometric vs MSigDB c5.go.bp universe, BH-FDR, both `tf_bg` and "
@@ -98,15 +141,23 @@ _PIPELINE_HEAD = [
 # Stages 4 and 5 name the assignment score and the matrix shape, so they are
 # built per-render in `pipeline()` above.
 _PIPELINE_TAIL = [
-    ("6. Per-program GO BP",
-     "enrich_tss_modules_msigdb.001.py",
-     "Hypergeometric vs MSigDB universe; gene set per program = unique "
-     "gene_names with ≥1 module dominantly assigned."),
-    ("7. App data layer",
-     "data/build_app_db.py",
+    ("10. App data layer",
+     "data/build_app_db.py + data/build_app_db_genome.py",
      "Packs every output above into a single DuckDB plus the aggregate "
-     "parquets used by this viewer."),
+     "parquets used by this viewer. The genome build is ADDITIVE: the "
+     "promoter tables keep serving the gene-centric front door, and the "
+     "element layer sits behind it."),
 ]
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def _n_elements() -> int | None:
+    """Genome-wide elements, straight from the table the site serves."""
+    try:
+        return int(db.get_con().execute(
+            "SELECT COUNT(*) FROM elements").fetchone()[0])
+    except Exception:
+        return None
+
 
 def _tier_score(qvalue: float | None) -> int | None:
     """The tier expressed in score units. Score is −10·log₁₀(Q), so a tier and
@@ -186,10 +237,24 @@ _PARAMS_TAIL = [
     ("Boundary fraction", "20% of peak height",
      "How far we walk outward from a module center before declaring its "
      "edge. Combined with valley-detection between adjacent peaks."),
-    ("NMF rank k", "10",
-     "Chosen by 20-seed ARI stability + Brunet cophenetic correlation. Both "
-     "diagnostics peak at k=10. Higher k explores finer biology but is "
-     "less reproducible across initializations."),
+    ("NMF rank k", "140",
+     "Chosen by held-out imputation cross-validation with a "
+     "one-standard-error rule; the RMSE minimum agrees. Split-half "
+     "replication is reported as a validation rather than used as the "
+     "selector: it rises monotonically toward triviality (56.4% at k=250), "
+     "so selecting on it would always choose the largest k offered."),
+    ("Element support floor", "11 distinct TFs",
+     "Calibrated against a circular-shift null rather than chosen. The "
+     "earlier floor of 2 carries a genome-wide FDR of 3.83 — the null makes "
+     "four times more 2-TF elements than the real data. chr19 still runs at "
+     "16.5% FDR under the global floor (genome 2.3%, chrX 0.00002%); "
+     "per-chromosome floors were rejected on column-comparability grounds."),
+    ("Masked-NMF λ", "1 above k ≈ 40",
+     "The regulariser is UNNORMALISED, so its value only means something "
+     "quoted with the matrix shape it was applied to. Without it the "
+     "factorization diverges silently at high rank: AUC cannot see it, "
+     "because AUC is a rank statistic, while RMSE reached 3.01 against 0.153 "
+     "for predicting all zeros."),
     ("NMF solver", "Multiplicative-update (MU), random init",
      "Default `init=nndsvd` stalled 25 min on a futex with default OpenBLAS "
      "threading on the sparse matrix. MU + random init runs in 1–8 s/fit."),
@@ -298,14 +363,23 @@ _LIMITATIONS_TAIL = [
      "σ = 25 bp is matched to ChIP-peak resolution. Smaller σ over-segments; "
      "larger σ merges adjacent sites. Sweeping σ ∈ {15, 25, 50} as a "
      "robustness check is on the to-do list."),
-    ("k = 10 is one rank",
-     "ARI / cophenetic both peaked at 10, but the data is genuinely high-"
-     "rank — k = 25 also has high stability and reveals finer biology. "
-     "Higher-k summary tables are kept for browsing."),
-    ("No archetype layer (yet)",
-     "Each gene currently has a `program_path` (ordered list of program ids) "
-     "but no learned 'gene archetype'. NMF on the [n_gene × 10] program-"
-     "presence matrix is the natural next layer and is on the to-do list."),
+    ("k = 140 is one rank",
+     "Cross-validation picks it, but the data is genuinely high-rank and no "
+     "single k is 'the' answer. 22 of the 140 programs hold fewer than 100 "
+     "elements and cover 0.1% of the data between them; the `substantive` "
+     "flag exists so those do not carry the same weight as PRC2."),
+    ("Gene-level archetypes do not work",
+     "Tested and rejected, not pending. Once genomic distance is controlled, "
+     "gene identity carries no information about an element's program: "
+     "same-gene element pairs score 0.2006 mean cosine against 0.2243 for "
+     "distance-matched different-gene pairs. This is not a granularity "
+     "problem that a coarser or finer aggregation would rescue. Families are "
+     "the layer above programs that the data does support."),
+    ("Nearest gene is a locator, not an assignment",
+     "56.6% of distal elements have a rival TSS within twice the distance to "
+     "their nearest one, so for most of them 'nearest gene' is close to a "
+     "coin flip. Views that list distal elements under a gene carry the "
+     "`n_tss_comparably_close` column for exactly this reason."),
 ]
 
 

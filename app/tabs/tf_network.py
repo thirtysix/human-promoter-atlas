@@ -28,7 +28,7 @@ def render() -> None:
     ui.intro_card(
         title="TF network — atlas-wide co-binding pairs",
         what="One row per unordered (TF A, TF B) pair counting how many "
-             "of the ~77,000 modules they share. Jaccard = symmetric "
+             "of the 117,006 modules they share. Jaccard = symmetric "
              "overlap; lift = co-occurrence over independence.",
         objective="Surface TF cliques and obligate partnerships across "
                    "the whole atlas — complement to the focal-TF view "

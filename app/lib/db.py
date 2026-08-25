@@ -64,11 +64,22 @@ def build_facts() -> dict:
         "n_tf": counts.get("n_tf"),
         "n_tss": counts.get("n_tss"),
         "n_modules": counts.get("n_modules"),
-        "n_programs": counts.get("n_programs") or m.get("k_canonical"),
+        # `n_programs` used to fall through to k_canonical, which is the
+        # PROMOTER factorization's rank and is 10 -- so the Methods page
+        # reported 10 programs while the site served 140. The manifest already
+        # separates the two (n_promoter_programs is null when that layer does
+        # not run); this reads what it actually says.
+        "n_programs": counts.get("n_programs_served")
+                      or counts.get("n_promoter_programs"),
+        "n_programs_served": counts.get("n_programs_served"),
+        "n_promoter_programs": counts.get("n_promoter_programs"),
+        "promoter_programs_ran": counts.get("n_promoter_programs") is not None,
         "tier": build.get("tier"),
         "qvalue": build.get("qvalue"),
         "tf_set": build.get("tf_set"),
         "min_score_assign": build.get("min_score_assign"),
+        # Promoter-layer rank. Kept for provenance, but it does NOT describe
+        # what the site serves -- read n_programs_served for that.
         "k_canonical": m.get("k_canonical"),
     }
 
