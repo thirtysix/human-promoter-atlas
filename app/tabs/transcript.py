@@ -16,10 +16,12 @@ HELP_GENE = (
 HELP_SCORE_RANGE = (
     "Filter for the TF rug panel only — peaks outside this score range are "
     "hidden from the visualization but kept for the per-TSS density. "
-    "ChIP-atlas peak score scales 0–1000 by how many experiments support "
-    "the peak. Module discovery used the build's assignment score. "
-    "Each TF gets its own "
-    "row and its own color; hover any tick to see its exact score."
+    "ChIP-atlas peak score scales 0–1000 by how many experiments support the "
+    "peak. **It opens at 500, above the score this build assigned at, so the "
+    "default view is the better-supported peaks — which means the rug shows "
+    "fewer TFs than the module tables below count. Drag the lower handle down "
+    "to the assignment score to see every peak the modules were built from.** "
+    "Each TF gets its own row and its own color; hover any tick for its score."
 )
 HELP_MODULES_TABLE = (
     "Each row is one detected regulatory module — a local concentration of "
@@ -198,12 +200,15 @@ def render() -> None:
         c_score, c_filter = st.columns([1, 2])
         with c_score:
             score_range = st.slider(
-                # Default starts at the build's assignment threshold, not a
-                # literal 500. At 500 on a build that assigns at 250 the plot
-                # opened hiding peaks the modules were actually built from, so
-                # the rug disagreed with the module blocks drawn over it.
+                # Display filter, NOT the build threshold -- that is baked
+                # into the tables and no slider can move it. Starts at 500 so
+                # the default view is the better-supported peaks; max() keeps
+                # it from ever sitting below the score the build assigned at.
+                # While it sits ABOVE that score the rug deliberately shows
+                # fewer TFs than the module tables count, which is why the
+                # caption below says so rather than leaving it to be found.
                 "peak score range", 0, 1000,
-                (db.min_score_assign(), 1000), step=50,
+                (max(500, db.min_score_assign()), 1000), step=50,
                 help=HELP_SCORE_RANGE,
                 key=f"tx_score_range_{tx_id}",
             )
@@ -236,13 +241,30 @@ def render() -> None:
         # band fell back to neutral grey while three captions promised
         # colour-coding.
         modules_df = _with_genome_annotation(modules_df, tx_id)
+        # The rug is 18 px per TF and alone decides page height, so it is
+        # capped by default and opened on request.
+        n_avail = int(avail["tf"].nunique()) if not avail.empty else 0
+        show_all = False
+        if n_avail > plotting.MAX_TF_ROWS:
+            show_all = st.checkbox(
+                f"Show all {n_avail} TF rows "
+                f"(default: the {plotting.MAX_TF_ROWS} with the most peaks)",
+                value=False, key=f"tx_show_all_tfs_{tx_id}",
+                help=f"The rug adds ~18 px per TF, so all {n_avail} rows make "
+                     f"a figure several screens tall. The hidden rows are the "
+                     f"ones with fewest peaks here; the density curve, the "
+                     f"structure track and the module rows use every TF "
+                     f"either way.")
         gs = db.get_gene_structure(str(tss_meta["chrom"]), int(tss_meta["tss"]),
                                    str(tss_meta["strand"]),
                                    gene_name=str(tss_meta.get("gene_name") or ""))
-        fig = plotting.fig_transcript_view(peaks_df, modules_df, tss_meta,
-                                            score_range=score_range,
-                                            tf_filter=tf_filter or None,
-                                            gene_structure=gs)
+        fig = plotting.fig_transcript_view(
+            peaks_df, modules_df, tss_meta,
+            score_range=score_range,
+            tf_filter=tf_filter or None,
+            gene_structure=gs,
+            max_tf_rows=None if (show_all or tf_filter)
+                        else plotting.MAX_TF_ROWS)
         st.plotly_chart(fig, width="stretch", theme=None)
 
     # ----- Beyond the promoter window --------------------------------------

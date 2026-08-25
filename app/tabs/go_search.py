@@ -78,6 +78,18 @@ def render() -> None:
             key="go_search_select",
             help="Start typing — Streamlit filters as you type.",
         )
+        # A term that is absent from this list was not tested and found wanting
+        # -- it is simply not in the vocabulary, and saying "not enriched for
+        # any program" would claim a negative result we do not have.
+        st.caption(
+            f"This searches the **{len(labels):,} terms that clear FDR ≤ 0.05 "
+            "in at least one family** — not all of GO. The families are built "
+            "from TF sets, so the vocabulary leans toward complexes and "
+            "regulatory processes (2,895 BP rows against 71 CC). Plenty of "
+            "real biology is legitimately absent: *ribosome biogenesis*, for "
+            "one, returns nothing here. A term missing from this list has not "
+            "been tested and rejected — it is out of scope for this layer."
+        )
 
         if not choice:
             st.markdown(

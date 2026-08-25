@@ -9,6 +9,14 @@ from plotly.subplots import make_subplots
 from scipy.ndimage import gaussian_filter1d
 
 
+# TF rows drawn in the rug before the rest go behind a toggle. The rug is
+# 18 px per TF and nothing else on the page scales with TF count, so it alone
+# decides page height: GAPDH's 375 TFs make a 7,267 px figure inside a
+# 13,305 px page. Capping the DEFAULT view keeps the density curve, the
+# structure track and the module rows on one or two screens; the tail is
+# mostly rows carrying two or three ticks at the same x.
+MAX_TF_ROWS = 60
+
 OUTER_HALF = 1500
 KDE_BW     = 25
 LEN_GRID   = 2 * OUTER_HALF + 1
@@ -648,7 +656,8 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
                         score_range: tuple[int, int] = (500, 1000),
                         tf_filter: list[str] | None = None,
                         compact: bool = False,
-                        gene_structure: pd.DataFrame | None = None) -> go.Figure:
+                        gene_structure: pd.DataFrame | None = None,
+                        max_tf_rows: int | None = MAX_TF_ROWS) -> go.Figure:
     """
     Aligned view for a single TSS:
        (1) per-TSS smoothed KDE density
@@ -675,6 +684,13 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
     if tf_filter:
         use = use[use["tf"].isin(tf_filter)]
     n_tfs = use["tf"].nunique()
+    # Applied here as well as at draw time, because the row heights and the
+    # figure height are computed from n_tfs further down: capping only at
+    # draw time would size the figure for every TF and render 60.
+    n_tfs_capped = (min(n_tfs, int(max_tf_rows))
+                    if max_tf_rows else n_tfs)
+    n_hidden_tfs = n_tfs - n_tfs_capped
+    n_tfs = n_tfs_capped
 
     # Per-TSS density (mass=1 per TF, distributed across its peaks at this TSS)
     grid = np.zeros(LEN_GRID, dtype=np.float64)
@@ -727,7 +743,10 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
     rug_title = (f"TFs binding at score ∈ [{smin}, {smax}] (n={n_tfs})"
                   if smin > 0 or smax < 1000 else
                   f"TFs binding (n={n_tfs})")
-    if tf_filter and n_tfs_total != n_tfs:
+    if n_hidden_tfs:
+        rug_title += (f" — showing the {n_tfs} with the most peaks, "
+                       f"{n_hidden_tfs} more hidden")
+    elif tf_filter and n_tfs_total != n_tfs:
         rug_title += f" — filtered from {n_tfs_total}"
     titles = ["KDE density (per-TF mass=1)"]
     if has_gs:
@@ -807,6 +826,16 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
     # visual unambiguous (color = TF identity, full stop) and surface
     # score via the slider (filtering) + the hover (exact value).
     if n_tfs:
+        # SELECTION and ORDERING are separate. Which TFs to keep is by peak
+        # count -- the densest binders are what a reader came for. How to lay
+        # them out is by mean position, so the rug still reads upstream-to-
+        # downstream top-to-bottom against the x-axis.
+        if max_tf_rows and n_tfs > max_tf_rows:
+            keep = (use.groupby("tf").size()
+                       .sort_values(ascending=False)
+                       .head(int(max_tf_rows)).index)
+            use = use[use["tf"].isin(keep)]
+            n_tfs = use["tf"].nunique()
         # Sort by mean position DESCENDING so that — combined with plotly's
         # y=0-at-bottom default — the most-upstream TFs render at the top
         # of the rug panel and the most-downstream at the bottom.
@@ -1441,6 +1470,7 @@ FAMILY_COLORS = (pc.qualitative.Dark24 + pc.qualitative.Light24)
 
 # Transcript lanes drawn in the structure track before overflow is summarised.
 MAX_STRUCTURE_LANES = 6
+
 
 # Direction chevrons on the transcript backbone. Only drawn in the gaps
 # BETWEEN exons -- a chevron laid over an exon box reads as part of the gene

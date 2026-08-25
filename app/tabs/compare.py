@@ -208,10 +208,9 @@ def render() -> None:
         with sc_col:
             score_range = st.slider(
                 "peak score range",
-                # Defaulting to 500 while the transcript page defaults to the
-                # build's assignment score meant the two views of the same
-                # promoter disagreed about which peaks exist.
-                0, 1000, (db.min_score_assign(), 1000), step=50,
+                # Same default as the transcript page — the two views of one
+                # promoter must not disagree about which peaks exist.
+                0, 1000, (max(500, db.min_score_assign()), 1000), step=50,
                 key="cmp_score_range",
                 help="Same range applied to both promoter maps for fair "
                      "comparison. Each rug tick is colored by its "
