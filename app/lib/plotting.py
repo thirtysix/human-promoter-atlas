@@ -1560,31 +1560,139 @@ def fig_gene_neighbourhood(el: pd.DataFrame, lo: float, hi: float,
     return fig
 
 
+# Below this many elements inside the promoter window, the smoothed curve is
+# describing noise and the panel says so instead.
+MIN_PROFILE_ELEMENTS = 50
+
+
+def fig_program_promoter_profile(prof: pd.DataFrame, program: int,
+                                  n_programs: int = 140,
+                                  half: int = 1500, bin_bp: int = 25,
+                                  smooth_bp: float = 50.0) -> go.Figure:
+    """Element density across the promoter window, linear axis.
+
+    The companion to fig_program_distance. That one uses a signed-log axis to
+    reach a megabase, which compresses the entire promoter window into a
+    handful of bars; this one spends the whole canvas on +/-1.5 kb, where the
+    shape actually is.
+
+    Drawn against the SAME reference the aggregate metaplot uses: the mean
+    across all programs, so a program reads as denser or sparser than typical
+    rather than in isolation. Both are per-Mb, so the comparison is a real
+    one and not a re-scaling.
+
+    Lightly smoothed, because a single program contributes a few thousand
+    elements over 120 bins where the aggregate metaplot averages 19,745 TSSs
+    and needs no smoothing. sigma is quoted on the axis so the smoothing is
+    never mistaken for resolution.
+    """
+    fig = go.Figure()
+    if prof.empty:
+        return fig
+    x = prof["bin"].to_numpy() * bin_bp + bin_bp / 2.0
+    per_mb = prof["n"].to_numpy() / bin_bp * 1e6
+    ref_mb = prof["n_all"].to_numpy() / max(n_programs, 1) / bin_bp * 1e6
+    sigma = max(smooth_bp / bin_bp, 1e-9)
+    y = gaussian_filter1d(per_mb.astype(float), sigma)
+    r = gaussian_filter1d(ref_mb.astype(float), sigma)
+
+    fig.add_trace(go.Scatter(
+        x=x, y=r, mode="lines", name=f"mean of {n_programs} programs",
+        line=dict(color=REFERENCE, width=1.5, dash="dot"),
+        hovertemplate="%{x:+,.0f} bp<br>%{y:,.0f} elements/Mb"
+                       "<extra>program mean</extra>"))
+    fig.add_trace(go.Scatter(
+        x=x, y=y, mode="lines", name=f"program {program}",
+        line=dict(color=PRIMARY, width=2.4),
+        fill="tozeroy", fillcolor="rgba(15,118,110,0.18)",
+        hovertemplate="%{x:+,.0f} bp<br>%{y:,.0f} elements/Mb"
+                       f"<extra>program {program}</extra>"))
+    fig.add_vline(x=0, line_dash="dash", line_color="red", line_width=1,
+                   opacity=0.6)
+    # A program with almost nothing in the window draws a flat line at zero,
+    # which reads as a broken panel rather than as "this program is not a
+    # promoter program". Say which it is. 22 of the 140 hold fewer than 100
+    # elements in total, so this is not a rare corner.
+    n_win = int(prof["n"].sum())
+    if n_win < MIN_PROFILE_ELEMENTS:
+        fig.add_annotation(
+            x=0.5, y=0.5, xref="x domain", yref="y domain",
+            showarrow=False, align="center",
+            font=dict(size=12, color=REFERENCE),
+            text=(f"{n_win:,} element{'s' if n_win != 1 else ''} in this "
+                  f"window<br>too few to read a shape from"))
+    fig.update_layout(
+        title=f"Program {program}: promoter window (±{half:,} bp)",
+        xaxis_title=f"← upstream (5′)　　bp from TSS　　downstream (3′) →",
+        yaxis_title="elements / Mb",
+        height=300, margin=dict(l=70, r=20, t=50, b=50),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0,
+                     xanchor="right", x=1, font=dict(size=10)),
+        hovermode="x unified")
+    fig.update_xaxes(range=[-half, half])
+    return fig
+
+
+def _log_bin_width_bp(b: int, bins: int = 40) -> float:
+    """Base pairs spanned by one bin of the signed-log distance histogram.
+
+    The SQL bins on sign(d) * log10(|d|), so every bin is the same width in
+    DECADES and an exponentially growing width in base pairs: the bin at 1 kb
+    spans ~780 bp, the one at 100 kb spans ~78,000. Bin 0 straddles the TSS
+    and collects both directions, so it gets twice the one-sided span.
+    """
+    step = 12.0 / bins
+    lo = abs(int(b)) * step
+    hi = lo + step
+    if int(b) == 0:
+        return max(2.0 * (10 ** hi), 1.0)
+    return max(10 ** hi - 10 ** lo, 1.0)
+
+
 def fig_program_distance(hist: pd.DataFrame, program: int,
                          bins: int = 40) -> go.Figure:
-    """Signed, log-scaled distance distribution for one program's elements.
+    """Where a program's elements sit, as DENSITY rather than raw count.
 
-    Log-scaled because these span three orders of magnitude -- PRC2's distal
-    elements have a p90 of 1.67 Mb while its promoter elements sit at 445 bp,
-    and a linear axis would put every promoter element in a single bar. Signed
-    because upstream and downstream are not interchangeable.
+    Plotting the raw count per bin inverted the finding. Because bin width in
+    base pairs grows exponentially with distance, distance was rewarded simply
+    for covering more genome: every program appeared to be sparse at the
+    promoter and to have symmetric distal maxima around +/-100 kb. Neither is
+    real. Pooled over all 467,223 elements the per-bp density falls
+    monotonically from ~71 million elements/Mb at 32-56 bp to ~4,700 at
+    1-1.8 Mb -- four orders of magnitude, no distal maximum anywhere, and the
+    TSS is the densest point on the axis.
+
+    Both of these are true at once and only the density view shows it: 76% of
+    elements are distal, because there is far more distal genome, AND promoter
+    base pairs are ~5.6x likelier to carry an element than the genome average.
+    That second fact is what promFEm/distFEm report, so the count version
+    contradicted the site's own columns.
+
+    Log y as well, because the range it now has to cover is four decades.
     """
     fig = go.Figure()
     if not hist.empty:
-        # bin index -> signed log10 bp, inverted from the SQL binning
-        centre = hist["bin"].to_numpy() * 12.0 / bins
+        b = hist["bin"].to_numpy()
+        centre = b * 12.0 / bins
         bp = np.sign(centre) * (10 ** np.abs(centre))
+        width_bp = np.array([_log_bin_width_bp(int(x), bins) for x in b])
+        per_mb = hist["n"].to_numpy() / width_bp * 1e6
         fig.add_trace(go.Bar(
-            x=centre, y=hist["n"], marker_color=PRIMARY,
-            customdata=bp,
-            hovertemplate="%{customdata:+,.0f} bp<br>%{y:,} elements<extra></extra>"))
+            x=centre, y=per_mb, marker_color=PRIMARY,
+            customdata=np.stack([bp, hist["n"].to_numpy(), width_bp], axis=-1),
+            hovertemplate=("%{customdata[0]:+,.0f} bp from TSS<br>"
+                            "%{y:,.0f} elements/Mb<br>"
+                            "%{customdata[1]:,} elements in this bin"
+                            " (spanning %{customdata[2]:,.0f} bp)"
+                            "<extra></extra>")))
     ticks = [-6, -5, -4, -3, 0, 3, 4, 5, 6]
     fig.update_layout(
-        title=f"Program {program}: element position relative to TSS",
+        title=f"Program {program}: element density relative to TSS",
         xaxis_title="distance from TSS (log scale, signed)",
-        yaxis_title="elements", height=300, bargap=0.02,
-        margin=dict(l=60, r=20, t=50, b=50), showlegend=False)
+        yaxis_title="elements / Mb", height=300, bargap=0.02,
+        margin=dict(l=70, r=20, t=50, b=50), showlegend=False)
     fig.update_xaxes(tickmode="array", tickvals=ticks,
                      ticktext=["−1Mb", "−100kb", "−10kb", "−1kb", "TSS",
                                "1kb", "10kb", "100kb", "1Mb"])
+    fig.update_yaxes(type="log")
     return fig

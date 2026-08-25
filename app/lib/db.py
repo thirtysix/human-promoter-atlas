@@ -1667,6 +1667,46 @@ def get_program_distance_hist(program: int, bins: int = 40) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_program_promoter_profile(program: int, half: int = 1500,
+                                 bin_bp: int = 25) -> pd.DataFrame:
+    """Element density across the promoter window, on a LINEAR axis.
+
+    The signed-log panel answers "how far out do this program's elements
+    reach". It cannot answer "what shape does it make at the promoter",
+    because the whole +/-1.5 kb window is four bars wide there. This is the
+    companion view: fixed-width bins, so a peak is a peak.
+
+    Returns the focal program's count per bin alongside the count across ALL
+    programs, so the caller can draw the same population reference the
+    aggregate metaplot uses -- a program is interesting relative to where
+    elements sit in general, not in isolation.
+    """
+    return get_con().execute(
+        """WITH b AS (
+             SELECT CAST(FLOOR(e.dist_to_tss / ?) AS INTEGER) AS bin,
+                    p.dominant_program AS prog
+             FROM elements e JOIN element_program p USING (element_id)
+             WHERE ABS(e.dist_to_tss) <= ?
+           )
+           SELECT bin,
+                  COUNT(*) FILTER (WHERE prog = ?) AS n,
+                  COUNT(*)                         AS n_all
+           FROM b GROUP BY 1 ORDER BY 1""",
+        [bin_bp, half, program]).df()
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def n_genome_programs() -> int:
+    """How many programs the genome layer serves. Used to turn the pooled
+    element profile into a per-program average for the reference line."""
+    try:
+        return int(get_con().execute(
+            "SELECT COUNT(*) FROM genome_programs").fetchone()[0])
+    except Exception:
+        return 1
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
 def get_module_annotation(transcript_id: str) -> pd.DataFrame:
     """Each promoter module with the genome-layer annotation it inherits.
 

@@ -95,6 +95,28 @@ def render() -> None:
             plotting.fig_program_distance(
                 db.get_program_distance_hist(int(sel)), int(sel)),
             width="stretch", theme=None)
+        # The log panel reaches a megabase but spends only a few bars on the
+        # promoter window; this one spends the whole canvas there.
+        st.plotly_chart(
+            plotting.fig_program_promoter_profile(
+                db.get_program_promoter_profile(int(sel)), int(sel),
+                n_programs=db.n_genome_programs()),
+            width="stretch", theme=None)
+        st.caption(
+            "Density, not counts. Each bar is the same width in decades and "
+            "so an exponentially growing width in base pairs — plotting raw "
+            "counts made every program look sparse at the promoter with "
+            "symmetric maxima near ±100 kb, and both were artifacts. "
+            "**How far out to trust the x position:** an element is placed "
+            "against its NEAREST TSS, and beyond 100 kb **76% have a rival "
+            "TSS within twice the distance** (43% at 10–100 kb, 5% at the "
+            "promoter). Far from the TSS this axis says where the element is "
+            "relative to *a* gene, not necessarily *this* one. The lower "
+            "panel spends the whole canvas on ±1.5 kb, on a linear axis, "
+            "against the mean across all 140 programs — lightly smoothed "
+            "(σ = 50 bp) because one program contributes a few thousand "
+            "elements where the aggregate metaplot averages 19,745 TSSs."
+        )
     with right:
         st.markdown("**Where its elements sit**",
                     help="Distances are medians and p90 rather than means: the "
