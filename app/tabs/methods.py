@@ -279,22 +279,34 @@ VERIFICATION = [
     ("Aggregate metaplot peak", "within ±100 bp",
      "Mean across all TFs across all canonical TSSs has a clear central "
      "peak — the promoter is a real signal-density spike, not a flat plateau."),
-    ("CTCF in two programs",
-     "P5 (median −43 bp, w/ RAD21/SMC1A/SMC3) and P1 (median +217 bp, w/ "
-     "BRD4/EP300/ETV6)",
-     "Same TF in two roles at two positions, separated by NMF — biological "
-     "validation that the per-gene module framing adds resolution beyond "
-     "single-window analysis."),
-    ("P10 → ribosome biogenesis",
-     "GABPA/THAP11/ETS1; OR=5.4, q = 7e-70",
-     "GABPA is the canonical regulator of nuclear-encoded ribosomal/"
-     "mitochondrial genes. The sharpest enrichment in the GO BP set."),
-    ("P3 → immune system process",
-     "RUNX1/FLI1/SPI1; OR=2.3, q = 1e-54",
-     "Hematopoietic ETS factors regulating immune-cell genes — textbook."),
-    ("Modules per TSS", "median 4, mean 4.2",
-     "Most canonical promoters are *multipartite*. ~7% have 0 modules "
-     "(no chip-atlas evidence); ~12% are mono-modular focused promoters."),
+    ("CTCF concentrates on cohesin",
+     "P120, loading 5.77; next-highest program 0.064",
+     "CTCF's loading is not spread across programs — it sits on one, "
+     "alongside RAD21 and STAG1, in the family named Mitotic cohesin "
+     "complex. If a TF's loading were spread evenly the factorization would "
+     "not be separating anything. (The earlier k=10 promoter build split "
+     "CTCF across two programs; at k=140 over genome-wide elements it does "
+     "not, which is a real difference between the builds, not a bug.)"),
+    ("EZH2 recovers PRC2",
+     "P12: EZH2, JARID2, SUZ12 as the top three loadings",
+     "No complex annotation enters the pipeline. If the three core PRC2 "
+     "subunits do not come out together, the factorization is not finding "
+     "complexes."),
+    ("JUN recovers AP-1",
+     "P116: JUN, FOSL2 and FOS among the top loadings, family named "
+     "Transcription factor ap 1 complex",
+     "The other canonical check, on a different complex and a different "
+     "family, so a single lucky recovery cannot pass it alone."),
+    ("Immune biology maps to several families",
+     "'Positive regulation of immune system process' → 10 of 28 families, "
+     "best q = 7.8e-05",
+     "Broad biology should touch many regulatory contexts rather than one. "
+     "A term of this generality hitting a single family would suggest the "
+     "families are absorbing noise."),
+    ("Modules per TSS", "median 6, mean 5.93",
+     "Most canonical promoters are *multipartite*. Only 0.8% have no module "
+     "at all, so absence of evidence is rare and worth a second look when "
+     "you see it."),
 ]
 
 def limitations(f: dict) -> list[tuple[str, str]]:
@@ -375,6 +387,13 @@ _LIMITATIONS_TAIL = [
      "distance-matched different-gene pairs. This is not a granularity "
      "problem that a coarser or finer aggregation would rescue. Families are "
      "the layer above programs that the data does support."),
+    ("Chromosome coverage differs between the two layers",
+     "The genome-wide element layer ran on chr1–22 and X. The promoter layer "
+     "includes chrY and chrMT, so 61 canonical TSSs on Y and 13 on MT have "
+     "peaks and promoter modules but no elements, no program and no family. "
+     "This is a scope limit, not a result: nothing on those chromosomes was "
+     "tested against the genome layer. Their pages say so rather than "
+     "reporting an empty result."),
     ("Nearest gene is a locator, not an assignment",
      "56.6% of distal elements have a rival TSS within twice the distance to "
      "their nearest one, so for most of them 'nearest gene' is close to a "
