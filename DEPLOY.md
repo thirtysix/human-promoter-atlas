@@ -55,8 +55,10 @@ outputs) and `HPA_DEPMAP_RAW` (raw DepMap CSVs). Defaults are
 `data/raw/analyses/` and `data/raw/depmap/` — override via env vars if
 the source data lives elsewhere on your machine.
 
-`build_aggregate_npy.py` must be re-run whenever the aggregate parquets
-change. It is not optional for memory, but it is optional for correctness:
+`build_aggregate_npy.py` writes sidecars for the `binary` and `score`
+flavours only — the two the UI can reach. The pipeline also produces `raw` and
+`raw_score1000`, which no page displays; their parquets ship but get no
+sidecar. It must be re-run whenever the aggregate parquets change. It is not optional for memory, but it is optional for correctness:
 the app checks each sidecar against its parquet's row order and falls back
 to reading the parquet if they disagree, so a forgotten rebuild costs about
 200 MB of resident memory rather than serving misaligned rows. The sidecars

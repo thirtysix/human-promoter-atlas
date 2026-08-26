@@ -33,13 +33,24 @@ sys.path.insert(0, str(REPO_DIR))
 from app.lib import matrix_sidecar  # noqa: E402
 
 AGG_DIR = REPO_DIR / "data" / "aggregate"
-FLAVORS = ("binary", "score", "raw", "raw_score1000")
+
+# Only the flavours the app can actually reach. The pipeline produces four
+# TF x position matrices, but the UI offers two -- the Aggregate tab's radio
+# is binary | score, and the Per-TF profile hardcodes binary. Building
+# sidecars for all four put 54.7 MB on a production disk at 80% for data
+# nothing can display. The raw parquets stay where they are; this decides
+# only which of them get a memory-mapped companion.
+FLAVORS = ("binary", "score")
+ALL_FLAVORS = ("binary", "score", "raw", "raw_score1000")
 
 
 def main() -> None:
     if not AGG_DIR.is_dir():
         sys.exit(f"No aggregate directory at {AGG_DIR}. Run build_app_db.py first.")
 
+    unreachable = [f for f in ALL_FLAVORS if f not in FLAVORS]
+    print(f"  sidecars for: {', '.join(FLAVORS)}")
+    print(f"  skipped (unreachable from any page): {', '.join(unreachable)}")
     built = skipped = 0
     for flavor in FLAVORS:
         src = AGG_DIR / f"tf_x_position.{flavor}.parquet"
