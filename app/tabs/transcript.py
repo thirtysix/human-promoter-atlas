@@ -36,6 +36,36 @@ HELP_PROG_CARDS = (
 )
 
 
+def _edge_element_note(tss_meta) -> None:
+    """Name any genome element that the ±1.5 kb window cuts in half.
+
+    Without this the peaks pile up against the edge of the plot with no band,
+    no label and no module -- CA6's element 2266 carries 45 assigned TFs
+    against 19 in the largest module actually shown, so the biggest thing at
+    the promoter is the one the figure truncates. 3,715 genes (19.2%) have an
+    element straddling the boundary, and in 775 of them it is the largest one.
+    """
+    edge = db.elements_straddling_window(
+        str(tss_meta.get("chrom", "")), int(tss_meta.get("tss", 0)),
+        str(tss_meta.get("strand", "+")))
+    if edge is None or edge.empty:
+        return
+    bits = []
+    for _, r in edge.iterrows():
+        side = "downstream" if r.lo_off > 0 else "upstream"
+        bits.append(f"**{int(r.n_tfs_assigned)} assigned TFs** at "
+                    f"{int(r.lo_off):+,}…{int(r.hi_off):+,} bp ({side})")
+    st.caption(
+        "⟩ **The window cuts an element in half.** "
+        + "; ".join(bits)
+        + f" — the promoter view stops at ±{plotting.OUTER_HALF:,} bp, so the "
+          "peaks stacked against that edge are part of a larger element that "
+          "continues beyond it. It carries no module band here because the "
+          "promoter pipeline cannot close a module whose centre falls outside "
+          "the window. The element view further down the page shows it whole."
+    )
+
+
 def _with_genome_annotation(modules_df, transcript_id: str):
     """Add `genome_program` / `family` to the promoter modules.
 
@@ -265,8 +295,13 @@ def render() -> None:
             gene_structure=gs,
             max_tf_rows=None if (show_all or tf_filter)
                         else plotting.MAX_TF_ROWS,
-            genome_covered=db.genome_layer_covers(tss_meta.get("chrom")))
+            genome_covered=db.genome_layer_covers(tss_meta.get("chrom")),
+            structure_extents=db.transcript_extent_local(
+                str(tss_meta["chrom"]), int(tss_meta["tss"]),
+                str(tss_meta["strand"]),
+                gene_name=str(tss_meta.get("gene_name") or "")))
         st.plotly_chart(fig, width="stretch", theme=None)
+        _edge_element_note(tss_meta)
 
     # ----- Beyond the promoter window --------------------------------------
     # The view above is fixed to +/-1.5 kb and cannot show a distal element:

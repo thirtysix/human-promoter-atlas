@@ -1776,6 +1776,71 @@ def get_module_annotation(transcript_id: str) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
+def elements_straddling_window(chrom: str, tss: int, strand: str,
+                               half: int = 1500) -> pd.DataFrame:
+    """Genome elements that cross the promoter window's edge.
+
+    These are invisible as elements in the promoter view: the peaks inside the
+    window are drawn, the rest are not, and no module is called because the
+    promoter pipeline cannot close one whose centre lies outside. Returned in
+    LOCAL (transcription-oriented) coordinates so the caller can name the side.
+    """
+    try:
+        df = get_con().execute(
+            """SELECT element_id, start, "end", n_tfs_assigned
+               FROM elements
+               WHERE chrom = ?
+                 AND "end"  >= ? AND start <= ?          -- overlaps the window
+                 AND (start < ? OR "end" > ?)            -- but is not contained
+               ORDER BY n_tfs_assigned DESC""",
+            [str(chrom), tss - half, tss + half, tss - half, tss + half]).df()
+    except Exception:
+        return pd.DataFrame()
+    if df.empty:
+        return df
+    if strand == "-":
+        df["lo_off"], df["hi_off"] = tss - df["end"], tss - df["start"]
+    else:
+        df["lo_off"], df["hi_off"] = df["start"] - tss, df["end"] - tss
+    return df
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def transcript_extent_local(chrom: str, tss: int, strand: str,
+                            gene_name: str | None = None) -> dict:
+    """Per-transcript full extent in LOCAL coordinates, ignoring the window.
+
+    get_gene_structure filters to the drawn window, so it cannot tell whether
+    a transcript stops there or runs on. 54.7% of canonical transcripts
+    continue past +1,500 -- CA6's second exon is at +3,395 -- and drawing the
+    backbone only across the in-window exons rendered a 29 kb gene as a 97 bp
+    stub with nothing to say it continued.
+
+    Bounded by what the parquet holds: build_gene_structure.py extracts
+    +/-5 kb around each TSS (EXTRACT_HALF), so this says a transcript
+    continues, never how far. That is enough to draw "runs off the view",
+    which is the only claim being made.
+    """
+    fn = DATA_DIR / "gene_structure.parquet"
+    if not fn.exists():
+        return {}
+    df = get_con().execute(
+        """SELECT transcript_id, MIN(start) AS s, MAX("end") AS e
+           FROM read_parquet(?)
+           WHERE chrom = ? AND (? IS NULL OR gene_name = ? OR gene_id = ?)
+           GROUP BY 1""",
+        [str(fn), str(chrom), gene_name, gene_name, gene_name]).df()
+    out = {}
+    for _, r in df.iterrows():
+        if strand == "-":
+            lo, hi = tss - int(r.e), tss - int(r.s)
+        else:
+            lo, hi = int(r.s) - tss, int(r.e) - tss
+        out[str(r.transcript_id)] = (lo, hi)
+    return out
+
+
 def get_gene_structure(chrom: str, tss: int, strand: str,
                        half: int = 1500, gene_name: str | None = None,
                        coding_only: bool = True) -> pd.DataFrame:

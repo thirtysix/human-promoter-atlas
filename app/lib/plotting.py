@@ -487,7 +487,9 @@ def _chevron_positions(g: pd.DataFrame) -> list[float]:
 
 
 def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "",
-                        focal_strand: str = "+") -> int:
+                        focal_strand: str = "+",
+                        extents: dict | None = None,
+                        half: int = OUTER_HALF) -> int:
     """Exon/CDS models as a genome-browser style track.
 
     Drawn directly under the density curve rather than at the bottom: the rug
@@ -551,6 +553,12 @@ def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "",
     # appearing last. Invert so it reads at the top.
     top = len(reps) - 1
     lanes = {t: top - i for t, i in lanes.items()}
+    # lane -> the transcript the lane is NAMED after. A collapsed "xN" lane can
+    # merge transcripts with identical in-window footprints that differ beyond
+    # it: CA6's x2 lane holds one transcript running to +3,574 and one ending
+    # at +97. The run-off line must describe the one the label names, or it
+    # asserts something true of only some of them.
+    lane_rep = {top - i: r for i, r in enumerate(reps)}
     seen = list(reversed(labels))
     order = reps
     n_total = n_groups
@@ -567,10 +575,35 @@ def _add_gene_structure(fig, gs: pd.DataFrame, row: int, focal_tx: str = "",
         focal = label == focal_tx
         colour = PRIMARY if focal else REFERENCE
         # thin backbone spanning the gene's extent in view
+        x0, x1 = float(g.local_start.min()), float(g.local_end.max())
         fig.add_trace(go.Scatter(
-            x=[g.local_start.min(), g.local_end.max()], y=[lane, lane],
+            x=[x0, x1], y=[lane, lane],
             mode="lines", line=dict(color=colour, width=1),
             hoverinfo="skip", showlegend=False), row=row, col=1)
+
+        # A transcript that runs past the window used to stop dead at its last
+        # in-window exon, so CA6 -- 29 kb and ~10 exons in Ensembl -- rendered
+        # as a 97 bp stub with nothing to say it continued. 54.7% of canonical
+        # transcripts do continue. Draw the run-off as a dashed line to the
+        # edge, the genome-browser convention, rather than implying the gene
+        # ends where the view does.
+        ext = (extents or {}).get(lane_rep.get(lane, label))
+        if ext:
+            e_lo, e_hi = ext
+            for edge, beyond, inner in ((half, e_hi > x1, x1),
+                                         (-half, e_lo < x0, x0)):
+                if not beyond or abs(inner) >= half:
+                    continue
+                fig.add_trace(go.Scatter(
+                    x=[inner, edge], y=[lane, lane], mode="lines",
+                    line=dict(color=colour, width=1, dash="dot"),
+                    opacity=0.75 if focal else 0.4,
+                    hovertemplate=(f"<b>{lane_rep.get(lane, label)}</b><br>"
+                                    f"continues past "
+                                    f"{edge:+,} bp — the promoter window ends "
+                                    f"here, the transcript does not"
+                                    "<extra></extra>"),
+                    showlegend=False), row=row, col=1)
 
         # Direction chevrons. Local coordinates were flipped by the focal
         # strand, so a lane on that same strand transcribes left-to-right.
@@ -665,7 +698,8 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
                         compact: bool = False,
                         gene_structure: pd.DataFrame | None = None,
                         max_tf_rows: int | None = MAX_TF_ROWS,
-                        genome_covered: bool = True) -> go.Figure:
+                        genome_covered: bool = True,
+                        structure_extents: dict | None = None) -> go.Figure:
     """
     Aligned view for a single TSS:
        (1) per-TSS smoothed KDE density
@@ -812,7 +846,8 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
         n_hidden, dir_cue = _add_gene_structure(
             fig, gene_structure, row_gs,
             focal_tx=str(tss_meta.get("transcript_id", "")),
-            focal_strand=str(tss_meta.get("strand", "+")))
+            focal_strand=str(tss_meta.get("strand", "+")),
+            extents=structure_extents)
         # The direction cue names only what was drawn -- see _add_gene_structure
         # -- so the title never advertises a chevron that is not on screen.
         # Matched on the exact placeholder, not a prefix: subplot titles are
