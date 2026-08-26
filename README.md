@@ -6,7 +6,7 @@ Interactive web companion to a canonical-promoter analysis: TF ChIP-seq
 binding patterns at the TSSs of all canonical protein-coding transcripts
 in the human genome (Ensembl GRCh38.114), plus the per-gene regulatory
 **modules** and NMF **programs** discovered from chip-atlas data over
-~1,300 TFs and ~19,700 TSSs.
+1,793 TFs and 19,745 TSSs.
 
 This repo contains the **viewer**. The upstream analysis pipeline that
 produces the inputs lives outside this repo; pointers to its expected
@@ -28,7 +28,7 @@ so every view is shareable.
 
 ![Aggregate tab](docs/screenshots/01-aggregate.png)
 
-> Mean binding profile of each TF across ~19,700 canonical protein-coding
+> Mean binding profile of each TF across 19,745 canonical protein-coding
 > promoters, transcription-oriented around the TSS at 0 bp. Establishes
 > the reference everything else is interpreted against — for example,
 > TBP peaking just upstream of the TSS confirms the canonical TATA-box
@@ -37,7 +37,7 @@ so every view is shareable.
 
 ---
 
-### 2 · Programs & modules — recurring promoter archetypes
+### 2 · Programs & modules — recurring TF co-binding
 
 ![Programs tab](docs/screenshots/02-programs.png)
 
@@ -51,17 +51,22 @@ so every view is shareable.
 
 ---
 
-### 3 · Archetypes — gene-level promoter labels
+### 3 · Program families — the vocabulary over the programs
 
-![Archetypes tab](docs/screenshots/03-archetypes.png)
+![Program families tab](docs/screenshots/03-archetypes.png)
 
-> The natural endpoint of the hierarchical decomposition:
-> TFs → modules → programs → **archetypes**. Each canonical gene is a
-> 10-vector counting how many of its modules belong to each program; NMF
-> on that [genes × programs] matrix gives A = 8 gene-level archetypes.
-> A6, for example, is the cohesin-dominated archetype whose 4,869 genes
-> light up homophilic cell-cell adhesion at OR = 7.5 — the
-> protocadherin/cohesin-anchored signal.
+> The layer above programs: the 140 genome-wide programs grouped into
+> **28 families** by how they CO-OCCUR across elements — do two programs
+> mark the same places — with each family named by MSigDB enrichment and
+> an FDR on every label. Grouping by shared TFs does not work here: NMF
+> drives components onto disjoint factor sets, so PRC2 and PRC1.1 have a
+> TF-loading cosine of 0.009 while marking the same locations.
+>
+> This replaced a gene-level archetype layer, which was tested and
+> rejected: once genomic distance is controlled, gene identity carries no
+> information about an element's program (same-gene element pairs score
+> 0.2006 mean cosine against 0.2243 for distance-matched different-gene
+> pairs).
 
 ---
 
@@ -69,9 +74,9 @@ so every view is shareable.
 
 ![GO search tab](docs/screenshots/04-go-search.png)
 
-> Type a biological process from the GO BP catalogue (or pick from
-> autocomplete over 147 indexed terms) and see every program + archetype
-> enriched for it, plus the overlap genes that drove each hit. The
+> Type a biological process (or pick from autocomplete over 981 terms
+> that clear FDR in at least one family) and see every program family
+> enriched for it, plus the family TFs that carried each hit. The
 > inverse of the per-program GO view: instead of *"what does this
 > program do?"*, it answers *"which programs implement this biology?"*
 
@@ -84,10 +89,10 @@ so every view is shareable.
 > The full module decomposition of a single canonical promoter. The
 > KDE curve is the smoothed density of TF binding within ±1.5 kb of the
 > TSS; the vertical color bands behind it are the detected modules,
-> each tinted by its dominant program. The header row reports the
-> gene-level archetype (here A7), module and distinct-program counts,
-> and the upstream → downstream program path. Below the promoter map
-> (off-screen in this capture) sit per-TF rugs at score ≥ 500, GTEx
+> each tinted by the program family it inherits from the genome layer.
+> The header row reports how many programs are present and how many
+> modules were detected. Below the promoter map (off-screen in this
+> capture) sit per-TF rugs, GTEx
 > tissue expression, DepMap CRISPR essentiality, and a TF–target
 > essentiality coupling card.
 
@@ -112,8 +117,8 @@ so every view is shareable.
 ![Per-TF tab](docs/screenshots/07-per-tf.png)
 
 > Everything the atlas knows about a single TF: aggregate binding
-> profile (with optional cluster-mean overlay), loading on each of the
-> 10 programs, TF-cluster membership at K=8 / K=12, DepMap CRISPR
+> profile (with optional cluster-mean overlay), loading on each genome
+> program it reaches, TF-cluster membership at K=8 / K=12, DepMap CRISPR
 > essentiality across lineages, GTEx tissue expression, top co-binding
 > partners ranked by shared modules, and top bound TSSs. CTCF — shown
 > here — appears in both P5 (cohesin near TSS) and P1 (chromatin
@@ -201,7 +206,7 @@ canonical-promoters/
 │   ├── pipeline.slurm archive.slurm sweep_min_score.slurm splithalf.slurm
 │   └── nmf_init_probe.slurm
 ├── docs/
-│   └── threshold-calibration.md    # why MIN_SCORE_ASSIGN=250 and k=10
+│   └── threshold-calibration.md    # why MIN_SCORE_ASSIGN=250 and k=140
 ├── .streamlit/
 │   └── config.toml                 # theme (teal primary)
 └── deploy/
