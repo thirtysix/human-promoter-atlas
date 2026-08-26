@@ -264,7 +264,8 @@ def render() -> None:
             tf_filter=tf_filter or None,
             gene_structure=gs,
             max_tf_rows=None if (show_all or tf_filter)
-                        else plotting.MAX_TF_ROWS)
+                        else plotting.MAX_TF_ROWS,
+            genome_covered=db.genome_layer_covers(tss_meta.get("chrom")))
         st.plotly_chart(fig, width="stretch", theme=None)
 
     # ----- Beyond the promoter window --------------------------------------
@@ -916,6 +917,15 @@ def _render_neighbourhood(tss_meta) -> None:
         return
     el = db.get_elements_for_gene(gene)
     if el.empty:
+        chrom = str((tss_meta or {}).get("chrom", ""))
+        if not db.genome_layer_covers(chrom):
+            # Silence here reads as "this gene has no distal regulation".
+            # Say which of the two it is.
+            st.info(
+                f"No genome-wide element view for this gene: **chr{chrom} was "
+                f"not included in the genome-wide analysis**, which covered "
+                f"chr1–22 and X. The promoter view above is unaffected."
+            )
         return
 
     n_far = int((el.stratum != "promoter").sum())
@@ -1032,13 +1042,28 @@ def _render_module_composition(modules_df, peaks_df) -> None:
                         "program", "family_label", "program_tfs",
                         "substantive", "match_bp"]].copy()
             n_link = int(show.program.notna().sum())
-            st.caption(
-                f"{n_link} of {len(show)} modules map to a genome-wide element "
-                f"and inherit its program and family. The rest fall below the "
-                f"genome support floor of 11 assigned TFs — the promoter "
-                f"pipeline keeps modules that floor rejects, so a blank here "
-                f"is a statement about evidence, not a missing lookup."
-            )
+            chrom = str((db.get_tss_meta(
+                str(modules_df.attrs.get("transcript_id", ""))) or {}).get("chrom", ""))
+            if not db.genome_layer_covers(chrom):
+                # Blaming the support floor here would name a reason that is
+                # not the reason: the genome layer ran on chr1-22 and X, so
+                # nothing on this chromosome was ever tested against it.
+                st.caption(
+                    f"**chr{chrom} is not covered by the genome-wide layer**, "
+                    f"which ran on chr1–22 and X. These {len(show)} modules "
+                    f"and their peaks are real; the program and family columns "
+                    f"are blank because no element was ever computed here, not "
+                    f"because the evidence fell short."
+                )
+            else:
+                st.caption(
+                    f"{n_link} of {len(show)} modules map to a genome-wide "
+                    f"element and inherit its program and family. The rest "
+                    f"fall below the genome support floor of 11 assigned TFs "
+                    f"— the promoter pipeline keeps modules that floor "
+                    f"rejects, so a blank here is a statement about evidence, "
+                    f"not a missing lookup."
+                )
             st.dataframe(
                 show.rename(columns={
                     "module_id": "module", "center_offset": "center (bp)",

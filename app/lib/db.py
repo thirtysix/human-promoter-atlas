@@ -1463,6 +1463,30 @@ def get_genome_programs(family: int | None = None) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
+def genome_layer_chroms() -> frozenset:
+    """Chromosomes the genome-wide element layer actually covers.
+
+    It ran on chr1-22 and X only. The promoter layer includes chrY and chrMT,
+    so 61 canonical TSSs on Y and 13 on MT have promoter modules and peaks but
+    no elements at all. Without this the UI reported their blank programs as
+    falling below the support floor -- a specific reason that is not the
+    reason. They were never tested.
+    """
+    try:
+        return frozenset(
+            str(r[0]) for r in
+            get_con().execute("SELECT DISTINCT chrom FROM elements").fetchall())
+    except Exception:
+        return frozenset()
+
+
+def genome_layer_covers(chrom) -> bool:
+    """Whether the genome layer analysed this chromosome at all."""
+    chroms = genome_layer_chroms()
+    return (not chroms) or (str(chrom) in chroms)
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
 def get_elements_for_gene(gene_name: str) -> pd.DataFrame:
     """Every element whose NEAREST gene is this one, with program and family.
 

@@ -664,7 +664,8 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
                         tf_filter: list[str] | None = None,
                         compact: bool = False,
                         gene_structure: pd.DataFrame | None = None,
-                        max_tf_rows: int | None = MAX_TF_ROWS) -> go.Figure:
+                        max_tf_rows: int | None = MAX_TF_ROWS,
+                        genome_covered: bool = True) -> go.Figure:
     """
     Aligned view for a single TSS:
        (1) per-TSS smoothed KDE density
@@ -968,12 +969,17 @@ def fig_transcript_view(peaks_df: pd.DataFrame, modules_df: pd.DataFrame,
         n_present = int(modules_df["genome_program"].dropna().nunique())
     else:
         n_present = n_prog
+    n_mod_txt = f"{len(modules_df)} module{'s' if len(modules_df) != 1 else ''}"
+    # On a chromosome the genome layer never ran, "0 programs present" states
+    # a result that was never computed. Report the modules and say nothing
+    # about programs.
+    prog_txt = (f"{n_present} program{'s' if n_present != 1 else ''} present "
+                f"({n_mod_txt})" if genome_covered
+                else f"{n_mod_txt} — chromosome outside the genome-wide layer")
     title = (f"<b>{tss_meta.get('gene_name','?')}</b>  "
              f"({tss_meta.get('transcript_id','?')})  •  "
              f"chr{tss_meta.get('chrom','?')}:{tss_meta.get('tss','?')} "
-             f"({tss_meta.get('strand','?')})  •  "
-             f"{n_present} program{'s' if n_present != 1 else ''} present "
-             f"({len(modules_df)} module{'s' if len(modules_df) != 1 else ''})")
+             f"({tss_meta.get('strand','?')})  •  {prog_txt}")
 
     fig.update_layout(
         title=title, height=height,
