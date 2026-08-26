@@ -96,18 +96,22 @@ def pipeline(f: dict) -> list[tuple[str, str, str]]:
          "of 3.83, because the null produces four times more 2-TF elements "
          "than the real data."),
         ("6. Choosing the rank",
-         "nmf_holdout_cv.py",
+         "nmf_holdout_cv.py + genome_splithalf.py",
          f"Held-out imputation cross-validation with a one-standard-error "
          f"rule picks k={k}; the RMSE minimum agrees. Split-half replication "
-         "is run as a VALIDATION, not a selector — it rises monotonically "
-         "toward triviality (56.4% at k=250), so selecting on it would "
-         "choose the largest k offered."),
+         "is run as a VALIDATION, not a selector: the number of replicating "
+         "components climbs with k across every rank measured — 16 at k=60, "
+         "35 at 90, 41 at 110, 53 at 125, 66 at 150 — so selecting on it "
+         "would tend toward the largest rank offered rather than the right "
+         "one."),
         ("7. Factorization",
          "genome_programs.py + genome_splithalf.py",
          f"Masked NMF on the {n_el} × {n_tf} element × TF matrix → W "
          "(elements × programs), H (programs × TFs). 72 of the components are "
-         "substantive (≥100 elements, seed stability ≥0.90) and 64 replicate "
-         "across disjoint experiments."),
+         "substantive (≥100 elements, seed stability ≥0.90). Replication "
+         "across disjoint experiment halves was measured at k=125 (53 "
+         "components) and k=150 (66), bracketing the shipped rank; it was "
+         "not run at k=140 itself."),
         ("8. Program families",
          "genome_program_families.py + genome_family_labels.py",
          "The programs are grouped into 28 families by CO-OCCURRENCE across "
@@ -241,13 +245,16 @@ _PARAMS_TAIL = [
      "Chosen by held-out imputation cross-validation with a "
      "one-standard-error rule; the RMSE minimum agrees. Split-half "
      "replication is reported as a validation rather than used as the "
-     "selector: it rises monotonically toward triviality (56.4% at k=250), "
-     "so selecting on it would always choose the largest k offered."),
+     "selector, because the count of replicating components climbs with k "
+     "at every rank measured (16 / 35 / 41 / 53 / 66 at k = 60 / 90 / 110 / "
+     "125 / 150), so selecting on it would tend toward the largest rank "
+     "offered. Note the sweep was run at those ranks and NOT at k=140 "
+     "itself: the shipped rank sits between the k=125 and k=150 points."),
     ("Element support floor", "11 distinct TFs",
      "Calibrated against a circular-shift null rather than chosen. The "
      "earlier floor of 2 carries a genome-wide FDR of 3.83 — the null makes "
      "four times more 2-TF elements than the real data. chr19 still runs at "
-     "16.5% FDR under the global floor (genome 2.3%, chrX 0.00002%); "
+     "16.5% FDR under the global floor (genome 2.3%, chrX 0.0018%); "
      "per-chromosome floors were rejected on column-comparability grounds."),
     ("Masked-NMF λ", "1 above k ≈ 40",
      "The regulariser is UNNORMALISED, so its value only means something "

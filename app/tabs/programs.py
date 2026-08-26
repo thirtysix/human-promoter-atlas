@@ -22,8 +22,9 @@ def render() -> None:
         title="Programs — recurring TF co-binding across the genome",
         what="**140 programs** factorized from 467,223 annotation-free "
              "elements × 1,793 TFs. **72 are substantive** (≥100 elements and "
-             "seed stability ≥0.90) and **64 replicate across disjoint "
-             "experiments**.",
+             "seed stability ≥0.90). Replication across disjoint experiment "
+             "halves was measured at the ranks either side of this one — 53 "
+             "components at k=125, 66 at k=150 — not at k=140 itself.",
         objective="Answer 'which factors act together, and where' — including "
                    "the 353,550 distal elements a ±1.5 kb promoter window "
                    "cannot see at all.",
