@@ -270,7 +270,7 @@ _PARAMS_TAIL = [
      "from the Yanai 2005 tau (tissue-specificity index) computation for "
      "programs and archetypes. Below ~40 donors the per-tissue mean TPM is "
      "noisy enough to inflate apparent tissue specificity. With the cutoff, "
-     "~50 of 66 GTEx v8 tissues are retained — every major organ system "
+     "50 of 68 GTEx V11 tissues are retained — every major organ system "
      "stays, only thinly-sampled sub-tissues (e.g. specific brain "
      "subregions, Cells - cultured fibroblasts) are dropped. Same threshold "
      "applies to program and archetype tau."),

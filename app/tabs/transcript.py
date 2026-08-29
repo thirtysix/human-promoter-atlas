@@ -377,7 +377,7 @@ def render() -> None:
                                   column_config={
                                       "tissue":    st.column_config.TextColumn(
                                           "tissue",
-                                          help="GTEx v8 tissue name."),
+                                          help="GTEx V11 tissue name."),
                                       "n_samples": st.column_config.NumberColumn(
                                           "n",
                                           help="# donor samples in this "

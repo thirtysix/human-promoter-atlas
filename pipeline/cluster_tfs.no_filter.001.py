@@ -15,7 +15,7 @@ Pipeline:
     3. Peak-height normalize each TF row (row.max -> 1) — clustering is on SHAPE,
        independent of absolute binding magnitude.
     4. Correlation-distance matrix (1 - Pearson r) across TFs.
-    5. Hierarchical clustering (average linkage) → cut at K_CLUSTERS.
+    5. Hierarchical clustering (Ward linkage, Euclidean distance) → cut at K_CLUSTERS.
     6. Plots: clustermap, per-cluster mean profile small-multiples, UMAP scatter.
     7. Outputs: tf_cluster_assignments.tsv, cluster_mean_profiles.tsv.
 """

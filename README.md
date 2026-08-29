@@ -42,12 +42,13 @@ so every view is shareable.
 ![Programs tab](docs/screenshots/02-programs.png)
 
 > A **module** is a local cluster of TF binding within a single promoter
-> (±1.5 kb of its TSS). A **program** is one of 10 archetypal modules —
-> discovered by NMF on the ~77,000-module × ~1,300-TF occupancy matrix —
-> each with a recognizable biological signature (e.g. P5 cohesin, P7
-> PIC, P1 chromatin downstream). For each program: top TFs by NMF H
-> loading, position-density across the window, module-driver-class
-> breakdown, and a full-atlas TF × tissue expression heatmap from GTEx.
+> (±1.5 kb of its TSS). A **program** is one of 140 archetypal elements —
+> discovered by NMF on the 467,223-element × 1,793-TF occupancy matrix,
+> of which 72 are substantive — each with a recognizable biological
+> signature (e.g. P5 cohesin, P7 PIC, P1 chromatin downstream). For each
+> program: top TFs by NMF H loading, position-density across the window,
+> module-driver-class breakdown, and a full-atlas TF × tissue expression
+> heatmap from GTEx.
 
 ---
 
@@ -285,5 +286,5 @@ Underlying data:
 - chip-atlas TF ChIP-seq peaks (https://chip-atlas.org)
 - Ensembl GRCh38.114 (https://www.ensembl.org)
 - MSigDB c5.go.bp.v2026.1.Hs (https://www.gsea-msigdb.org/gsea/msigdb)
-- GTEx v8 (https://gtexportal.org)
+- GTEx v11 (https://gtexportal.org)
 - DepMap CRISPR (Chronos) gene effects (https://depmap.org)
